@@ -1,0 +1,46 @@
+HOST_EVENTS = (
+    "host:join_room",
+    "host:start_quiz",
+    "host:next_slide",
+    "host:prev_slide",
+    "host:lock_answers",
+    "host:start_reveal",
+    "host:reveal_slide",
+    "host:next_reveal_slide",
+    "host:prev_reveal_slide",
+    "host:validate_reveal_slide",
+    "host:override_answer_validation",
+    "host:validate_answer",
+    "host:finish_quiz",
+    "host:reset_session",
+    "host:audio_play",
+    "host:audio_pause",
+    "host:audio_seek",
+)
+
+PLAYER_EVENTS = (
+    "player:join_room",
+    "player:rejoin_room",
+    "player:submit_answer",
+    "player:leave_room",
+)
+
+SERVER_EVENTS = (
+    "room:player_joined",
+    "room:player_left",
+    "room:state_updated",
+    "quiz:slide_started",
+    "quiz:answer_submitted",
+    "quiz:answer_received",
+    "quiz:answers_count_updated",
+    "quiz:answers_locked",
+    "quiz:reveal_started",
+    "quiz:slide_revealed",
+    "quiz:slide_points_validated",
+    "quiz:score_updated",
+    "quiz:answer_validation_updated",
+    "quiz:reveal_finished",
+    "quiz:finished",
+    "quiz:audio_control",
+    "error",
+)

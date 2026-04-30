@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+motor
+pydantic
+email-validator
+python-jose
+bcrypt
+python-multipart
+python-socketio
+httpx
+yt-dlp

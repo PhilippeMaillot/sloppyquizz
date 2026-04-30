@@ -1,0 +1,66 @@
+services:
+  mongodb:
+    image: mongo:7
+    container_name: sloppyquizz-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: sloppyquizz-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      APP_NAME: SloppyQuizz API
+      APP_ENV: docker
+      API_PREFIX: /api
+      FRONTEND_URL: http://localhost:5173
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      MONGO_URI: mongodb://mongodb:27017
+      MONGO_DB_NAME: sloppyquizz
+      JWT_SECRET: change_me
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      UPLOAD_DIR: app/uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_uploads:/app/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: sloppyquizz-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+      VITE_SOCKET_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+
+volumes:
+  mongodb_data:
+  backend_uploads:
+
