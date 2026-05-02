@@ -53,6 +53,27 @@ class AudioService:
             [*base, "--extractor-args", "youtube:player_client=web", source_url],
         ]
 
+    def _download_ytdlp_commands(self, source_url: str, output_path: Path) -> list[list[str]]:
+        base = [
+            "yt-dlp",
+            "--no-playlist",
+            "--no-warnings",
+            "--retries",
+            "3",
+            "--socket-timeout",
+            "10",
+            "-f",
+            "bestaudio/best",
+            "-o",
+            str(output_path),
+        ]
+
+        return [
+            [*base, source_url],
+            [*base, "--extractor-args", "youtube:player_client=android", source_url],
+            [*base, "--extractor-args", "youtube:player_client=web", source_url],
+        ]
+
     def ensure_ytdlp(self) -> None:
         if shutil.which("yt-dlp") is None:
             raise HTTPException(
@@ -177,26 +198,27 @@ class AudioService:
                 tmp_dir_path = Path(tmp_dir)
                 downloaded_path = tmp_dir_path / "downloaded.%(ext)s"
 
-                # Download bestaudio only, no shell interpolation, args list for safety.
-                ytdlp_cmd = [
-                    "yt-dlp",
-                    "--no-playlist",
-                    "-f",
-                    "bestaudio/best",
-                    "-o",
-                    str(downloaded_path),
-                    source_url,
-                ]
-                ytdlp = subprocess.run(
-                    ytdlp_cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if ytdlp.returncode != 0:
+                last_error: str | None = None
+                download_succeeded = False
+
+                for ytdlp_cmd in self._download_ytdlp_commands(source_url, downloaded_path):
+                    ytdlp = subprocess.run(
+                        ytdlp_cmd,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=180,
+                    )
+                    if ytdlp.returncode == 0:
+                        download_succeeded = True
+                        break
+
+                    last_error = ytdlp.stderr.strip() or ytdlp.stdout.strip() or "unknown error"
+
+                if not download_succeeded:
                     raise HTTPException(
                         status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"yt-dlp failed: {ytdlp.stderr.strip() or ytdlp.stdout.strip() or 'unknown error'}",
+                        detail=f"yt-dlp failed: {last_error or 'unknown error'}",
                     )
 
                 # Find the downloaded file (yt-dlp replaced %(ext)s).
