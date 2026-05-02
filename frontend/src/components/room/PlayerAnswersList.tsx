@@ -6,7 +6,7 @@ type PlayerAnswersListProps = {
   currentPlayerId?: string
   pointsForSlide?: number | null
   showActions?: boolean
-  onMarkCorrect?: (answerId: string) => void
+  onMarkCorrect?: (answerId: string, pointsAwarded: number) => void
   onMarkIncorrect?: (answerId: string) => void
 }
 

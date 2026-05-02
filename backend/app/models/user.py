@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserStats(BaseModel):
-    totalPoints: int = 0
+    totalPoints: float = 0
     quizzesCreated: int = 0
     quizzesPlayed: int = 0
     wins: int = 0

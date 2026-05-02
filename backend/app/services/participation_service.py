@@ -46,8 +46,13 @@ class ParticipationService:
 
         players = list(room.get("players", []))
         answers = list(room.get("answers", []))
+        if any((answer.get("validation") or {}).get("method", "none") != "manual" for answer in answers):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All submitted answers must be validated before finishing the quiz",
+            )
 
-        # Recalculate scores from validated answers (method != none).
+        # Recalculate scores from host-validated answers.
         players = self.scoring_service.recalculate_player_scores(players, answers)
 
         ranking = self._build_ranking(players)
@@ -151,13 +156,13 @@ class ParticipationService:
         return [self._to_public(document) async for document in cursor]
 
     def _build_ranking(self, players: list[dict]) -> list[dict]:
-        sorted_players = sorted(players, key=lambda player: int(player.get("score") or 0), reverse=True)
+        sorted_players = sorted(players, key=lambda player: float(player.get("score") or 0), reverse=True)
 
         ranking: list[dict] = []
-        last_score: int | None = None
+        last_score: float | None = None
         last_rank = 0
         for index, player in enumerate(sorted_players):
-            score = int(player.get("score") or 0)
+            score = float(player.get("score") or 0)
             if last_score is None or score != last_score:
                 last_rank = index + 1
                 last_score = score
@@ -189,7 +194,7 @@ class ParticipationService:
         validated_answers = [
             answer
             for answer in answers
-            if (answer.get("validation") or {}).get("method", "none") != "none"
+            if (answer.get("validation") or {}).get("method", "none") == "manual"
         ]
 
         by_player: dict[str, list[dict]] = {}
@@ -216,7 +221,7 @@ class ParticipationService:
                 "playerId": player_id,
                 "userId": ObjectId(user_id) if isinstance(user_id, str) and ObjectId.is_valid(user_id) else None,
                 "nickname": entry.get("nickname") or "Player",
-                "score": int(entry.get("score") or 0),
+                "score": float(entry.get("score") or 0),
                 "rank": int(entry.get("rank") or 0),
                 "correctAnswersCount": correct_count,
                 "answers": player_answers,
@@ -246,7 +251,7 @@ class ParticipationService:
             playerId=document.get("playerId"),
             userId=str(document["userId"]) if document.get("userId") is not None else None,
             nickname=document.get("nickname", "Player"),
-            score=int(document.get("score") or 0),
+            score=float(document.get("score") or 0),
             rank=int(document.get("rank") or 0),
             correctAnswersCount=int(document.get("correctAnswersCount") or 0),
             answers=list(document.get("answers", [])),

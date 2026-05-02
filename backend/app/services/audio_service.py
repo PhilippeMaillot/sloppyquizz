@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import shutil
 import subprocess
 import tempfile
@@ -21,24 +22,38 @@ class ProcessedAudio:
     duration: int
 
 
+@dataclass(frozen=True)
+class YoutubeAudioPreview:
+    sourceUrl: str
+    previewUrl: str
+    title: str | None
+    duration: int | None
+
+
 class AudioService:
     MAX_DURATION_SECONDS = 60
 
-    def ensure_dependencies(self) -> None:
+    def ensure_ytdlp(self) -> None:
         if shutil.which("yt-dlp") is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="yt-dlp is not installed. Install it to enable blind test audio processing.",
             )
+
+    def ensure_dependencies(self) -> None:
+        self.ensure_ytdlp()
         if shutil.which("ffmpeg") is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="ffmpeg is not installed. Install it to enable blind test audio processing.",
             )
 
-    def validate_request(self, *, source_url: str, start_time: int, end_time: int) -> None:
+    def validate_source_url(self, source_url: str) -> None:
         if not isinstance(source_url, str) or not source_url.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sourceUrl is required")
+
+    def validate_request(self, *, source_url: str, start_time: int, end_time: int) -> None:
+        self.validate_source_url(source_url)
         if not isinstance(start_time, int) or start_time < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="startTime must be >= 0")
         if not isinstance(end_time, int) or end_time <= start_time:
@@ -52,6 +67,70 @@ class AudioService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Extract duration is too long (max {self.MAX_DURATION_SECONDS}s)",
             )
+
+    def prepare_youtube_preview(self, *, source_url: str) -> YoutubeAudioPreview:
+        self.ensure_ytdlp()
+        self.validate_source_url(source_url)
+
+        ytdlp_cmd = [
+            "yt-dlp",
+            "--dump-single-json",
+            "--no-playlist",
+            "--no-warnings",
+            "-f",
+            "bestaudio/best",
+            source_url,
+        ]
+        try:
+            ytdlp = subprocess.run(
+                ytdlp_cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="yt-dlp took too long to return audio metadata",
+            ) from error
+        if ytdlp.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"yt-dlp failed: {ytdlp.stderr.strip() or ytdlp.stdout.strip() or 'unknown error'}",
+            )
+
+        try:
+            info = json.loads(ytdlp.stdout)
+        except json.JSONDecodeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="yt-dlp did not return valid metadata",
+            ) from error
+
+        preview_url = info.get("url")
+        requested_downloads = info.get("requested_downloads")
+        if not preview_url and isinstance(requested_downloads, list) and requested_downloads:
+            first_download = requested_downloads[0]
+            if isinstance(first_download, dict):
+                preview_url = first_download.get("url")
+
+        if not isinstance(preview_url, str) or not preview_url:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="yt-dlp did not return a playable audio URL",
+            )
+
+        duration_raw = info.get("duration")
+        duration = int(duration_raw) if isinstance(duration_raw, (int, float)) else None
+        title_raw = info.get("title")
+
+        return YoutubeAudioPreview(
+            sourceUrl=source_url,
+            previewUrl=preview_url,
+            title=title_raw if isinstance(title_raw, str) else None,
+            duration=duration,
+        )
 
     def process_youtube_audio(
         self,

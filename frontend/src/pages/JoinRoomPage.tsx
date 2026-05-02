@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { PageCard } from '../components/ui/PageCard'
 import { Button } from '../components/ui/Button'
@@ -9,12 +9,14 @@ import { roomApi } from '../services/roomApi'
 import { socketClient } from '../services/socketClient'
 import type { PlayerJoinAck, RoomInvite } from '../types/room'
 import { useAuthStore } from '../stores/authStore'
+import { createAuthRedirectState } from '../utils/authRedirect'
 
 const PLAYER_SESSION_KEY = 'sloppyquizz.playerSession'
 
 export function JoinRoomPage() {
   const { roomCode } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const accessToken = useAuthStore((state) => state.accessToken)
   const user = useAuthStore((state) => state.user)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -26,6 +28,7 @@ export function JoinRoomPage() {
   const [wsError, setWsError] = useState<string | null>(null)
 
   const cleanCode = useMemo(() => code.trim().toUpperCase(), [code])
+  const authRedirectState = useMemo(() => createAuthRedirectState(location), [location])
 
   useEffect(() => {
     if (!cleanCode || cleanCode.length !== 6) {
@@ -145,10 +148,18 @@ export function JoinRoomPage() {
             description="Pour participer (scores, historique, classements), tu dois être connecté."
             actions={
               <>
-                <Button type="button" variant="primary" onClick={() => navigate('/login')}>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => navigate('/login', { state: authRedirectState })}
+                >
                   Se connecter
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => navigate('/register')}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => navigate('/register', { state: authRedirectState })}
+                >
                   Créer un compte
                 </Button>
               </>

@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button'
 import { FormField, Input } from '../components/ui/FormField'
 import { authApi } from '../services/authApi'
 import { useAuthStore } from '../stores/authStore'
+import { getAuthRedirectPath, preserveAuthRedirectState } from '../utils/authRedirect'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -15,6 +16,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const authRedirectState = preserveAuthRedirectState(location.state)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -24,9 +26,7 @@ export function LoginPage() {
     try {
       const response = await authApi.login({ username, password })
       setSession(response.accessToken, response.user)
-      const from = (location.state as { from?: { pathname?: string } } | null)?.from
-        ?.pathname
-      navigate(from ?? '/dashboard', { replace: true })
+      navigate(getAuthRedirectPath(location.state), { replace: true })
     } catch {
       setError('Pseudo ou mot de passe invalide.')
     } finally {
@@ -71,7 +71,7 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <Link to="/register" className="text-link">
+      <Link className="text-link" state={authRedirectState} to="/register">
         Créer un compte
       </Link>
     </PageCard>

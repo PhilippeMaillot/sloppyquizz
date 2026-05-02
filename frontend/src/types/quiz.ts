@@ -31,6 +31,7 @@ export type SlideTextElement = SlideElementBase & {
   text: string
   fontSize?: number
   align?: 'left' | 'center' | 'right'
+  color?: string
 }
 
 export type SlideElement = SlideImageElement | SlideTextElement

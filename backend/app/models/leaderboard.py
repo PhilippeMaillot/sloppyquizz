@@ -8,8 +8,8 @@ class QuizLeaderboardEntryPublic(BaseModel):
     quizId: str
     userId: str | None = None
     nickname: str
-    bestScore: int
-    lastScore: int
+    bestScore: float
+    lastScore: float
     timesPlayed: int
     updatedAt: datetime
 
@@ -18,7 +18,7 @@ class GlobalLeaderboardEntryPublic(BaseModel):
     rank: int
     userId: str | None = None
     nickname: str
-    totalPoints: int
+    totalPoints: float
     quizzesPlayed: int
     wins: int
     updatedAt: datetime

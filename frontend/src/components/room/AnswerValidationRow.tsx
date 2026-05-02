@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import type { RevealedAnswer } from '../../types/room'
 
 type AnswerValidationRowProps = {
@@ -5,7 +7,7 @@ type AnswerValidationRowProps = {
   isOwnAnswer?: boolean
   pointsForSlide?: number | null
   showActions?: boolean
-  onMarkCorrect?: (answerId: string) => void
+  onMarkCorrect?: (answerId: string, pointsAwarded: number) => void
   onMarkIncorrect?: (answerId: string) => void
 }
 
@@ -25,25 +27,6 @@ function formatStatus(answer: RevealedAnswer) {
   return 'Non validé'
 }
 
-function formatMethodLabel(method?: string) {
-  if (!method || method === 'none') {
-    return 'non validé'
-  }
-  if (method === 'auto') {
-    return 'validation automatique héritée'
-  }
-  if (method === 'ai') {
-    return 'validation héritée'
-  }
-  if (method === 'manual_required') {
-    return 'à vérifier'
-  }
-  if (method === 'manual') {
-    return 'corrigé manuellement'
-  }
-  return method
-}
-
 export function AnswerValidationRow({
   answer,
   isOwnAnswer,
@@ -56,12 +39,22 @@ export function AnswerValidationRow({
   const awarded = answer.pointsAwarded ?? 0
   const maxPoints = pointsForSlide ?? undefined
   const method = answer.validation?.method
-  const methodLabel = formatMethodLabel(method)
-  const confidence =
-    typeof answer.validation?.confidence === 'number'
-      ? Math.round(answer.validation.confidence * 100)
-      : null
-  const reason = answer.validation?.reason ?? null
+  const [draftPoints, setDraftPoints] = useState(
+    String(method === 'manual' ? awarded : (pointsForSlide ?? awarded ?? 0)),
+  )
+
+  useEffect(() => {
+    setDraftPoints(String(answer.validation?.method === 'manual' ? awarded : (pointsForSlide ?? awarded ?? 0)))
+  }, [answer.validation?.method, awarded, pointsForSlide])
+
+  function parseDraftPoints() {
+    const parsed = Number(draftPoints.replace(',', '.'))
+    if (!Number.isFinite(parsed)) {
+      return 0
+    }
+    const bounded = Math.max(0, parsed)
+    return typeof maxPoints === 'number' ? Math.min(bounded, maxPoints) : bounded
+  }
 
   return (
     <article className={isOwnAnswer ? 'validation-row validation-row-own' : 'validation-row'}>
@@ -72,25 +65,28 @@ export function AnswerValidationRow({
 
       <div className="validation-row-meta">
         <span className="validation-row-status">{status}</span>
-        <span className={`validation-row-badge validation-row-badge-${method ?? 'none'}`}>
-          {methodLabel}
-        </span>
-        {confidence !== null ? (
-          <span className="validation-row-confidence">{confidence}%</span>
-        ) : null}
         <strong className="validation-row-points">
           +{awarded}
           {typeof maxPoints === 'number' ? ` / ${maxPoints}` : ''}
         </strong>
       </div>
 
-      {reason ? <small className="validation-row-reason">{reason}</small> : null}
-
       {showActions ? (
         <div className="validation-row-actions">
+          <label className="validation-points-field">
+            Points
+            <input
+              max={maxPoints}
+              min={0}
+              onChange={(event) => setDraftPoints(event.target.value)}
+              step="0.5"
+              type="number"
+              value={draftPoints}
+            />
+          </label>
           <button
             className="primary-button"
-            onClick={() => onMarkCorrect?.(answer.answerId)}
+            onClick={() => onMarkCorrect?.(answer.answerId, parseDraftPoints())}
             type="button"
           >
             Valider

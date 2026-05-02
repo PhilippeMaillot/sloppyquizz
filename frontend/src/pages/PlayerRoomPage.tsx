@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { RevealPanel } from '../components/room/RevealPanel'
-import { ScoreUpdateDisplay } from '../components/room/ScoreUpdateDisplay'
 import { Scoreboard } from '../components/room/Scoreboard'
 import { SlideCanvas } from '../components/slide/SlideCanvas'
 import { PageCard } from '../components/ui/PageCard'
@@ -239,12 +238,6 @@ export function PlayerRoomPage() {
     }
   }
 
-  function handleLeaveRoom() {
-    socketClient.emit('player:leave_room', { roomCode })
-    sessionStorage.removeItem(PLAYER_SESSION_KEY)
-    setSession(null)
-  }
-
   function buildAnswer() {
     if (currentSlide?.type === 'single_choice') {
       return selectedAnswerId
@@ -319,13 +312,6 @@ export function PlayerRoomPage() {
       {room?.status === 'REVEAL_PHASE' ? (
         reveal ? (
           <>
-            <EmptyState
-              title="Reveal en cours"
-              description="Le host révèle les réponses slide par slide."
-            />
-            {session?.playerId ? (
-              <ScoreUpdateDisplay currentPlayerId={session.playerId} reveal={reveal} />
-            ) : null}
             {room?.players?.length ? (
               <Scoreboard
                 highlightPlayerId={session?.playerId ?? undefined}
@@ -337,7 +323,7 @@ export function PlayerRoomPage() {
           </>
         ) : (
           <EmptyState
-            title="Reveal en cours"
+            title="En attente"
             description="En attente de la première slide révélée…"
           />
         )

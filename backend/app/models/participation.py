@@ -12,7 +12,7 @@ class ParticipationPublic(BaseModel):
     playerId: str
     userId: str | None = None
     nickname: str = Field(min_length=1, max_length=40)
-    score: int
+    score: float
     rank: int
     correctAnswersCount: int = 0
     answers: list[dict] = Field(default_factory=list)

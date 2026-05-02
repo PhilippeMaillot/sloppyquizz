@@ -8,7 +8,7 @@ from app.utils.text_normalization import normalize_text
 @dataclass(frozen=True)
 class ScoringResult:
     is_correct: bool
-    points_awarded: int
+    points_awarded: float
     validation: dict
 
 
@@ -23,7 +23,7 @@ class ScoringService:
         New live gameplay uses manual host validation during reveal.
         """
         slide_type = slide.get("type")
-        slide_points = int(slide.get("points") or 0)
+        slide_points = float(slide.get("points") or 0)
 
         if slide_type == "single_choice":
             is_correct = self._is_correct_single_choice(slide, submitted_answer.get("answer"))
@@ -58,11 +58,16 @@ class ScoringService:
         *,
         is_correct: bool,
         host_id: str,
+        points_awarded: float | None = None,
     ) -> ScoringResult:
-        slide_points = int(slide.get("points") or 0)
+        slide_points = float(slide.get("points") or 0)
+        if points_awarded is None:
+            final_points = slide_points if is_correct else 0.0
+        else:
+            final_points = min(max(float(points_awarded), 0.0), slide_points)
         return ScoringResult(
             is_correct=bool(is_correct),
-            points_awarded=slide_points if is_correct else 0,
+            points_awarded=final_points,
             validation={
                 "method": "manual",
                 "confidence": None,
@@ -72,7 +77,7 @@ class ScoringService:
         )
 
     def recalculate_player_scores(self, players: list[dict], answers: list[dict]) -> list[dict]:
-        points_by_player: dict[str, int] = {}
+        points_by_player: dict[str, float] = {}
         for answer in answers:
             validation_method = (answer.get("validation") or {}).get("method", "none")
             # Only count answers that were actually validated.
@@ -81,7 +86,7 @@ class ScoringService:
             player_id = answer.get("playerId")
             if not isinstance(player_id, str) or not player_id:
                 continue
-            points_by_player[player_id] = points_by_player.get(player_id, 0) + int(
+            points_by_player[player_id] = points_by_player.get(player_id, 0.0) + float(
                 answer.get("pointsAwarded") or 0
             )
 
@@ -94,7 +99,7 @@ class ScoringService:
                 updated_players.append(player)
         return updated_players
 
-    def _build_auto_result(self, is_correct: bool, slide_points: int) -> ScoringResult:
+    def _build_auto_result(self, is_correct: bool, slide_points: float) -> ScoringResult:
         return ScoringResult(
             is_correct=bool(is_correct),
             points_awarded=slide_points if is_correct else 0,

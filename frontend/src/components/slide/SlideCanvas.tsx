@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 import type { SlideElement } from '../../types/quiz'
 import { getBackendOrigin } from '../../services/audioApi'
 
@@ -8,9 +10,21 @@ type SlideCanvasProps = {
   legacyQuestion?: string | null
 }
 
+const CANVAS_BASE_WIDTH = 1920
+const DEFAULT_TEXT_SIZE = 22
+const DEFAULT_TEXT_COLOR = '#1d2340'
+
 function resolveMediaUrl(url: string) {
   if (url.startsWith('http://') || url.startsWith('https://')) return url
   return `${getBackendOrigin()}${url}`
+}
+
+function toCanvasFontSize(fontSize: number | undefined) {
+  const safeFontSize =
+    typeof fontSize === 'number' && Number.isFinite(fontSize) && fontSize > 0
+      ? fontSize
+      : DEFAULT_TEXT_SIZE
+  return `${(safeFontSize / CANVAS_BASE_WIDTH) * 100}cqw`
 }
 
 export function SlideCanvas({ elements, legacyImageUrl, legacyQuestion }: SlideCanvasProps) {
@@ -41,6 +55,7 @@ export function SlideCanvas({ elements, legacyImageUrl, legacyQuestion }: SlideC
       text: legacyQuestion,
       fontSize: 22,
       align: 'left',
+      color: DEFAULT_TEXT_COLOR,
     })
   }
 
@@ -49,7 +64,7 @@ export function SlideCanvas({ elements, legacyImageUrl, legacyQuestion }: SlideC
   return (
     <div className="slide-canvas" aria-label="Slide canvas">
       {sorted.map((el) => {
-        const style: React.CSSProperties = {
+        const style: CSSProperties = {
           left: `${el.x}%`,
           top: `${el.y}%`,
           width: `${el.w}%`,
@@ -70,7 +85,10 @@ export function SlideCanvas({ elements, legacyImageUrl, legacyQuestion }: SlideC
           <div className="slide-canvas-el slide-canvas-text" key={el.id} style={style}>
             <div
               className={`slide-canvas-text-inner slide-canvas-text-${align}`}
-              style={{ fontSize: el.fontSize ? `${el.fontSize}px` : undefined }}
+              style={{
+                color: el.color ?? undefined,
+                fontSize: toCanvasFontSize(el.fontSize),
+              }}
             >
               {el.text}
             </div>

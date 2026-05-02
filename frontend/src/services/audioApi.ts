@@ -9,7 +9,28 @@ export type ProcessYoutubeAudioPayload = {
   endTime: number
 }
 
+export type YoutubeAudioPreview = {
+  sourceUrl: string
+  previewUrl: string
+  title: string | null
+  duration: number | null
+}
+
+export type YoutubeAudioPreviewPayload = {
+  quizId: string
+  slideId: string
+  sourceUrl: string
+}
+
 export const audioApi = {
+  prepareYoutubePreview: async (payload: YoutubeAudioPreviewPayload) => {
+    const response = await apiClient.post<{ preview: YoutubeAudioPreview }>(
+      '/audio/youtube-preview',
+      payload,
+    )
+    return response.data.preview
+  },
+
   processYoutube: async (payload: ProcessYoutubeAudioPayload) => {
     const response = await apiClient.post<{ audio: BlindTestAudio }>(
       '/audio/process-youtube',

@@ -260,6 +260,11 @@ async def host_override_answer_validation(sid: str, payload: dict):
             raise ValueError("answerId is required")
         if not isinstance(is_correct, bool):
             raise ValueError("isCorrect must be a boolean")
+        points_awarded = payload.get("pointsAwarded")
+        if points_awarded is not None and (
+            isinstance(points_awarded, bool) or not isinstance(points_awarded, (int, float))
+        ):
+            raise ValueError("pointsAwarded must be a number")
 
         return await room_manager.override_answer_validation(
             sio,
@@ -268,6 +273,7 @@ async def host_override_answer_validation(sid: str, payload: dict):
             _extract_room_code(payload),
             answer_id.strip(),
             is_correct,
+            float(points_awarded) if points_awarded is not None else None,
         )
     except (PermissionError, ValueError) as error:
         await _emit_error(sid, str(error))

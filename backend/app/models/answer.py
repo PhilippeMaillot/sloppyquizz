@@ -20,5 +20,5 @@ class SubmittedAnswer(BaseModel):
     answer: str | list[str]
     submittedAt: datetime
     isCorrect: bool | None = None
-    pointsAwarded: int = 0
+    pointsAwarded: float = 0
     validation: AnswerValidation = AnswerValidation()

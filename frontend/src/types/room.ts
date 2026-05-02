@@ -67,6 +67,7 @@ export type LiveSlide = {
     text?: string
     fontSize?: number
     align?: 'left' | 'center' | 'right'
+    color?: string
   }> | null
   points?: number
   answerMode?: string

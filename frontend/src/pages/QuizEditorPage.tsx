@@ -20,9 +20,10 @@ import type {
   ChoiceSlide,
   QuestionSlideType,
   BlindTestSlide,
+  SlideElement,
+  SlideTextElement,
   QuizSlide,
   QuizSummary,
-  TextAnswerSlide,
 } from '../types/quiz'
 import { BlindTestEditor } from '../components/editor/BlindTestEditor'
 
@@ -38,7 +39,7 @@ function createId(prefix: string) {
 
 function createDefaultAnswers(): ChoiceAnswer[] {
   return [
-    { id: createId('answer'), text: 'Réponse A', isCorrect: true },
+    { id: createId('answer'), text: 'Réponse A', isCorrect: false },
     { id: createId('answer'), text: 'Réponse B', isCorrect: false },
   ]
 }
@@ -92,6 +93,54 @@ function isBlindTestSlide(slide: QuizSlide): slide is BlindTestSlide {
   return slide.type === 'blind_test'
 }
 
+const LEGACY_QUESTION_ELEMENT_ID = 'legacy-question'
+const DEFAULT_TEXT_COLOR = '#1d2340'
+
+function createQuestionElement(question: string, existing?: SlideTextElement): SlideTextElement {
+  return {
+    id: LEGACY_QUESTION_ELEMENT_ID,
+    type: 'text',
+    x: existing?.x ?? 5,
+    y: existing?.y ?? 6,
+    w: existing?.w ?? 90,
+    h: existing?.h ?? 12,
+    z: existing?.z ?? 10,
+    text: question,
+    fontSize: existing?.fontSize ?? 28,
+    align: existing?.align ?? 'left',
+    color: existing?.color ?? DEFAULT_TEXT_COLOR,
+  }
+}
+
+function syncQuestionElement(slide: QuizSlide, question: string): QuizSlide {
+  const existingElements = (slide.elements ?? []) as SlideElement[]
+  const existingQuestionElement = existingElements.find(
+    (el): el is SlideTextElement =>
+      el.id === LEGACY_QUESTION_ELEMENT_ID && el.type === 'text',
+  )
+
+  if (!question.trim()) {
+    return {
+      ...slide,
+      question,
+      elements: existingElements.filter((el) => el.id !== LEGACY_QUESTION_ELEMENT_ID),
+    } as QuizSlide
+  }
+
+  const nextQuestionElement = createQuestionElement(question, existingQuestionElement)
+  const nextElements = existingQuestionElement
+    ? existingElements.map((el) =>
+        el.id === LEGACY_QUESTION_ELEMENT_ID ? nextQuestionElement : el,
+      )
+    : [...existingElements, nextQuestionElement]
+
+  return {
+    ...slide,
+    question,
+    elements: nextElements,
+  } as QuizSlide
+}
+
 function reorderSlides(slides: QuizSlide[]) {
   return slides.map((slide, index) => ({ ...slide, order: index }))
 }
@@ -123,40 +172,14 @@ function validateSlides(title: string, slides: QuizSlide[]) {
         return `Toutes les réponses de "${slide.title}" doivent avoir un texte.`
       }
 
-      if (!slide.answers.some((answer) => answer.isCorrect)) {
-        return `Sélectionne au moins une bonne réponse dans "${slide.title}".`
-      }
-
-      if (
-        slide.type === 'single_choice' &&
-        slide.answers.filter((answer) => answer.isCorrect).length !== 1
-      ) {
-        return `La slide "${slide.title}" (choix unique) doit avoir exactement une bonne réponse.`
-      }
-    }
-
-    if (slide.type === 'text_answer' && !slide.expectedAnswer.trim()) {
-      return `La slide "${slide.title}" doit avoir une réponse attendue.`
     }
 
     if (slide.type === 'blind_test') {
       if (!slide.audio?.storedFileUrl) {
         return `La slide "${slide.title}" doit avoir un extrait audio.`
       }
-      if (slide.answerMode === 'text' && !slide.expectedAnswer.trim()) {
-        return `La slide "${slide.title}" doit avoir une réponse attendue.`
-      }
       if (slide.answerMode === 'single_choice' && slide.answers.length < 2) {
         return `La slide "${slide.title}" doit avoir au moins deux réponses.`
-      }
-      if (slide.answerMode === 'single_choice' && !slide.answers.some((answer) => answer.isCorrect)) {
-        return `Sélectionne au moins une bonne réponse dans "${slide.title}".`
-      }
-      if (
-        slide.answerMode === 'single_choice' &&
-        slide.answers.filter((answer) => answer.isCorrect).length !== 1
-      ) {
-        return `Le blind test "${slide.title}" (choix unique) doit avoir exactement une bonne réponse.`
       }
     }
   }
@@ -636,26 +659,9 @@ function SlideEditor({
 }: SlideEditorProps) {
   useEffect(() => {
     const existing = (slide.elements ?? []) as any[]
-    const hasLegacy = existing.some((el) => el?.id === 'legacy-question')
+    const hasLegacy = existing.some((el) => el?.id === LEGACY_QUESTION_ELEMENT_ID)
     if (!hasLegacy && slide.question?.trim()) {
-      updateSlide({
-        ...slide,
-        elements: [
-          ...existing,
-          {
-            id: 'legacy-question',
-            type: 'text',
-            x: 5,
-            y: 6,
-            w: 90,
-            h: 12,
-            z: 10,
-            text: slide.question,
-            fontSize: 28,
-            align: 'left',
-          },
-        ],
-      } as QuizSlide)
+      updateSlide(syncQuestionElement(slide, slide.question))
     }
     // On ne veut le faire qu’à l’ouverture d’une slide (pas à chaque frappe).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -690,7 +696,7 @@ function SlideEditor({
         Question
         <textarea
           onChange={(event) =>
-            updateSlide({ ...slide, question: event.target.value } as QuizSlide)
+            updateSlide(syncQuestionElement(slide, event.target.value))
           }
           rows={3}
           value={slide.question}
@@ -724,7 +730,9 @@ function SlideEditor({
           legacyQuestion={slide.question}
           backgroundColor={slide.backgroundColor ?? null}
           onChange={(next) => {
-            const legacy = (next as any[]).find((el) => el?.id === 'legacy-question' && el?.type === 'text')
+            const legacy = (next as any[]).find(
+              (el) => el?.id === LEGACY_QUESTION_ELEMENT_ID && el?.type === 'text',
+            )
             updateSlide(
               {
                 ...slide,
@@ -769,10 +777,7 @@ function SlideEditor({
           updateAnswer={updateAnswer}
         />
       ) : (
-        <TextAnswerFields
-          slide={slide}
-          updateSlide={(nextSlide) => updateSlide(nextSlide)}
-        />
+        <TextAnswerFields />
       )}
     </div>
   )
@@ -810,20 +815,6 @@ function ChoiceSlideFields({
 
       {slide.answers.map((answer) => (
         <div className="answer-row" key={answer.id}>
-          <label className="answer-correct-control">
-            <input
-              checked={answer.isCorrect}
-              name={slide.id}
-              onChange={(event) =>
-                updateAnswer(slide, answer.id, {
-                  isCorrect:
-                    event.target.checked,
-                })
-              }
-              type="radio"
-            />
-          </label>
-
           <input
             onChange={(event) =>
               updateAnswer(slide, answer.id, { text: event.target.value })
@@ -845,28 +836,12 @@ function ChoiceSlideFields({
   )
 }
 
-type TextAnswerFieldsProps = {
-  slide: TextAnswerSlide
-  updateSlide: (slide: TextAnswerSlide) => void
-}
-
-function TextAnswerFields({ slide, updateSlide }: TextAnswerFieldsProps) {
+function TextAnswerFields() {
   return (
     <div className="text-answer-editor">
-      <label>
-        Expected answer
-        <input
-          onChange={(event) =>
-            updateSlide({ ...slide, expectedAnswer: event.target.value })
-          }
-          type="text"
-          value={slide.expectedAnswer}
-        />
-      </label>
-
       <p className="form-hint">
-        La correction est manuelle : le host décidera pendant le reveal si chaque
-        réponse est correcte.
+        La correction est manuelle : les joueurs écrivent leur réponse, puis le host
+        attribue les points pendant le reveal.
       </p>
     </div>
   )

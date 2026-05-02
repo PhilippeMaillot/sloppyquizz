@@ -59,35 +59,71 @@ class RoomManager:
             raise ValueError("Nickname is required")
 
         now = datetime.now(timezone.utc)
-        player_id = generate_id("player")
-        player = {
-            "playerId": player_id,
-            "userId": user_id,
-            "nickname": clean_nickname,
-            "avatarUrl": None,
-            "score": 0,
-            "connected": True,
-            "joinedAt": now,
-        }
+        # If the client is authenticated, try to find an existing player
+        # for this user and mark them connected instead of creating a new one.
+        existing_player_id: str | None = None
+        if user_id is not None:
+            for p in room.get("players", []):
+                if p.get("userId") is not None and str(p.get("userId")) == str(user_id):
+                    existing_player_id = p.get("playerId")
+                    break
 
-        await database.rooms.update_one(
-            {"_id": room["_id"]},
-            {
-                "$push": {"players": player},
-                "$set": {"updatedAt": now},
-            },
-        )
-        updated_room, quiz = await self._get_room_and_quiz(database, room_code)
-        self.sid_to_player[sid] = (updated_room["code"], player_id)
-        await sio.enter_room(sid, updated_room["code"])
+        if existing_player_id is not None:
+            # Reuse the existing player entry: set connected True and update nickname.
+            await database.rooms.update_one(
+                {"_id": room["_id"], "players.playerId": existing_player_id},
+                {
+                    "$set": {
+                        "players.$.connected": True,
+                        "players.$.nickname": clean_nickname,
+                        "updatedAt": now,
+                    }
+                },
+            )
+            updated_room, quiz = await self._get_room_and_quiz(database, room_code)
+            self.sid_to_player[sid] = (updated_room["code"], existing_player_id)
+            await sio.enter_room(sid, updated_room["code"])
 
-        state = self._build_room_state(updated_room, quiz)
-        player_payload = {
-            **player,
-            "joinedAt": player["joinedAt"].isoformat(),
-        }
-        await sio.emit("room:player_joined", player_payload, room=updated_room["code"])
-        await sio.emit("room:state_updated", state, room=updated_room["code"])
+            state = self._build_room_state(updated_room, quiz)
+            # find the up-to-date player object
+            player_obj = next((pl for pl in updated_room.get("players", []) if pl.get("playerId") == existing_player_id), None)
+            player_payload = {
+                **(player_obj or {}),
+                "joinedAt": (player_obj.get("joinedAt") if player_obj else now).isoformat(),
+            }
+            await sio.emit("room:player_joined", player_payload, room=updated_room["code"])
+            await sio.emit("room:state_updated", state, room=updated_room["code"])
+        else:
+            # No existing player for this user: create a new player entry.
+            player_id = generate_id("player")
+            player = {
+                "playerId": player_id,
+                "userId": user_id,
+                "nickname": clean_nickname,
+                "avatarUrl": None,
+                "score": 0,
+                "connected": True,
+                "joinedAt": now,
+            }
+
+            await database.rooms.update_one(
+                {"_id": room["_id"]},
+                {
+                    "$push": {"players": player},
+                    "$set": {"updatedAt": now},
+                },
+            )
+            updated_room, quiz = await self._get_room_and_quiz(database, room_code)
+            self.sid_to_player[sid] = (updated_room["code"], player_id)
+            await sio.enter_room(sid, updated_room["code"])
+
+            state = self._build_room_state(updated_room, quiz)
+            player_payload = {
+                **player,
+                "joinedAt": player["joinedAt"].isoformat(),
+            }
+            await sio.emit("room:player_joined", player_payload, room=updated_room["code"])
+            await sio.emit("room:state_updated", state, room=updated_room["code"])
 
         if updated_room.get("status") == "QUESTION_ACTIVE":
             slide_payload = self._build_slide_payload(updated_room, quiz)
@@ -452,8 +488,8 @@ class RoomManager:
         slides = quiz.get("slides", [])
         if not slides:
             raise ValueError("This quiz has no slides")
-        if room.get("status") != "QUESTION_LOCKED":
-            raise ValueError("Last question must be locked before starting reveal")
+        if room.get("status") not in {"QUESTION_ACTIVE", "QUESTION_LOCKED"}:
+            raise ValueError("Last question must be active before starting reveal")
         current_index = int(room.get("currentSlideIndex", 0))
         if current_index != len(slides) - 1:
             raise ValueError("Reveal can only start after the last question")
@@ -511,7 +547,17 @@ class RoomManager:
         if not slides:
             raise ValueError("This quiz has no slides")
 
-        next_index = int(room.get("revealSlideIndex", 0)) + 1
+        current_reveal_index = int(room.get("revealSlideIndex", 0))
+        current_slide = slides[current_reveal_index] if current_reveal_index < len(slides) else None
+        current_slide_id = current_slide.get("id") if isinstance(current_slide, dict) else None
+        if any(
+            answer.get("slideId") == current_slide_id
+            and (answer.get("validation") or {}).get("method", "none") != "manual"
+            for answer in room.get("answers", [])
+        ):
+            raise ValueError("All submitted answers must be validated before moving on")
+
+        next_index = current_reveal_index + 1
         now = datetime.now(timezone.utc)
         if next_index >= len(slides):
             await database.rooms.update_one(
@@ -706,6 +752,7 @@ class RoomManager:
         room_code: str,
         answer_id: str,
         is_correct: bool,
+        points_awarded: float | None = None,
     ) -> dict:
         room, quiz = await self._get_room_and_quiz(database, room_code)
         self._ensure_host(room, sid)
@@ -732,7 +779,11 @@ class RoomManager:
                 raise ValueError("Slide not found for this answer")
 
             result = self.scoring_service.apply_manual_override(
-                slide, answer, is_correct=bool(is_correct), host_id=host_id
+                slide,
+                answer,
+                is_correct=bool(is_correct),
+                host_id=host_id,
+                points_awarded=points_awarded,
             )
             updated = {
                 **answer,
@@ -802,6 +853,11 @@ class RoomManager:
     ) -> dict:
         room, _quiz = await self._get_room_and_quiz(database, room_code)
         self._ensure_host(room, sid)
+        if any(
+            (answer.get("validation") or {}).get("method", "none") != "manual"
+            for answer in room.get("answers", [])
+        ):
+            raise ValueError("All submitted answers must be validated before finishing the quiz")
 
         host_id = self.sid_to_user_id.get(sid)
         if host_id is None:
@@ -1014,47 +1070,6 @@ class RoomManager:
 
     def _build_correct_answer(self, slide: dict) -> dict:
         slide_type = slide.get("type")
-        if slide_type == "single_choice":
-            correct_answers = [
-                {
-                    "id": answer.get("id"),
-                    "text": answer.get("text"),
-                }
-                for answer in slide.get("answers", [])
-                if answer.get("isCorrect") is True
-            ]
-            return {
-                "type": slide_type,
-                "answers": correct_answers,
-            }
-
-        if slide_type == "text_answer":
-            return {
-                "type": slide_type,
-                "expectedAnswer": slide.get("expectedAnswer"),
-            }
-
-        if slide_type == "blind_test":
-            answer_mode = slide.get("answerMode", "text")
-            if answer_mode == "text":
-                return {
-                    "type": slide_type,
-                    "expectedAnswer": slide.get("expectedAnswer"),
-                }
-            if answer_mode == "single_choice":
-                correct_answers = [
-                    {
-                        "id": answer.get("id"),
-                        "text": answer.get("text"),
-                    }
-                    for answer in slide.get("answers", [])
-                    if answer.get("isCorrect") is True
-                ]
-                return {
-                    "type": slide_type,
-                    "answers": correct_answers,
-                }
-
         return {"type": slide_type}
 
     def _sanitize_slide_for_players(self, slide: dict) -> dict:

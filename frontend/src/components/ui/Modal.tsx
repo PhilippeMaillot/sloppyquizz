@@ -5,14 +5,15 @@ type ModalProps = {
   title?: string
   children: ReactNode
   footer?: ReactNode
+  className?: string
   onClose: () => void
 }
 
-export function Modal({ open, title, children, footer, onClose }: ModalProps) {
+export function Modal({ open, title, children, footer, className, onClose }: ModalProps) {
   if (!open) return null
   return (
     <div className="ui-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="ui-modal" role="document">
+      <div className={`ui-modal${className ? ` ${className}` : ''}`} role="document">
         <header className="ui-modal-header">
           {title ? <h3 className="ui-modal-title">{title}</h3> : <span />}
           <button className="ui-modal-close" onClick={onClose} type="button">

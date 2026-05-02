@@ -18,7 +18,7 @@ class RoomPlayer(BaseModel):
     userId: str | None = None
     nickname: str = Field(min_length=1, max_length=40)
     avatarUrl: str | None = None
-    score: int = 0
+    score: float = 0
     connected: bool = True
     joinedAt: datetime
 

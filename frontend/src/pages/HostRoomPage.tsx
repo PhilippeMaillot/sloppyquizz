@@ -8,7 +8,6 @@ import { SlideCanvas } from '../components/slide/SlideCanvas'
 import { PageCard } from '../components/ui/PageCard'
 import { Button } from '../components/ui/Button'
 import { EmptyState } from '../components/ui/EmptyState'
-import { Modal } from '../components/ui/Modal'
 import { getBackendOrigin } from '../services/audioApi'
 import { roomApi } from '../services/roomApi'
 import { socketClient } from '../services/socketClient'
@@ -34,7 +33,6 @@ export function HostRoomPage() {
   const [answeredPlayerIds, setAnsweredPlayerIds] = useState<Set<string>>(new Set())
   const [reveal, setReveal] = useState<RevealPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [presentationOpen, setPresentationOpen] = useState(false)
   const hostAudioRef = useRef<HTMLAudioElement | null>(null)
   const suppressSeekRef = useRef(false)
 
@@ -163,10 +161,10 @@ export function HostRoomPage() {
   const currentIndex = room?.currentSlideIndex ?? 0
   const revealIndex = room?.revealSlideIndex ?? 0
   const isLastSlide = totalSlides > 0 && currentIndex === totalSlides - 1
+  const isLastRevealSlide = totalSlides > 0 && revealIndex === totalSlides - 1
   const canStartQuiz = status === 'WAITING_ROOM'
-  const canNavigateSlides = status === 'QUESTION_ACTIVE'
-  const canLockAnswers = status === 'QUESTION_ACTIVE'
-  const canStartReveal = status === 'QUESTION_LOCKED' && isLastSlide
+  const isQuestionPhase = status === 'QUESTION_ACTIVE' || status === 'QUESTION_LOCKED'
+  const canNavigateSlides = isQuestionPhase
   const isRevealPhase = status === 'REVEAL_PHASE'
   const canGoNextReveal = Boolean(
     isRevealPhase &&
@@ -174,14 +172,15 @@ export function HostRoomPage() {
       (reveal.validationState.validatedAnswers ?? 0) >= (reveal.validationState.totalAnswers ?? 0),
   )
 
-  useEffect(() => {
-    if (status === 'QUESTION_ACTIVE' || status === 'QUESTION_LOCKED' || status === 'REVEAL_PHASE') {
-      setPresentationOpen(true)
-    }
-    if (status === 'WAITING_ROOM' || status === 'FINISHED') {
-      setPresentationOpen(false)
-    }
-  }, [status])
+  const pageTitle = isRevealPhase
+    ? reveal?.slide.title ?? `Révélation — slide ${revealIndex + 1} / ${totalSlides}`
+    : isQuestionPhase
+      ? currentSlide?.title ?? `Quiz — slide ${currentIndex + 1} / ${totalSlides}`
+      : 'Session (Host)'
+
+  const pageDescription = isQuestionPhase || isRevealPhase
+    ? undefined
+    : 'Tout ce qu’il faut pour animer la partie, en grand et au calme.'
 
   function handleStartQuiz() {
     socketClient.emit('host:start_quiz', { roomCode })
@@ -195,16 +194,8 @@ export function HostRoomPage() {
     socketClient.emit('host:prev_slide', { roomCode })
   }
 
-  function handleLockAnswers() {
-    socketClient.emit('host:lock_answers', { roomCode })
-  }
-
   function handleStartReveal() {
     socketClient.emit('host:start_reveal', { roomCode })
-  }
-
-  function handleRevealCurrentSlide() {
-    socketClient.emit('host:reveal_slide', { roomCode })
   }
 
   function handleNextRevealSlide() {
@@ -215,11 +206,16 @@ export function HostRoomPage() {
     socketClient.emit('host:prev_reveal_slide', { roomCode })
   }
 
-  function handleOverrideAnswerValidation(answerId: string, isCorrect: boolean) {
+  function handleOverrideAnswerValidation(
+    answerId: string,
+    isCorrect: boolean,
+    pointsAwarded?: number,
+  ) {
     socketClient.emit('host:override_answer_validation', {
       roomCode,
       answerId,
       isCorrect,
+      pointsAwarded,
     })
   }
 
@@ -232,7 +228,6 @@ export function HostRoomPage() {
     setReveal(null)
     setCurrentSlide(null)
     setAnswerCount(null)
-    setPresentationOpen(false)
   }
 
   function emitAudio(action: 'play' | 'pause' | 'seek') {
@@ -247,119 +242,61 @@ export function HostRoomPage() {
   return (
     <PageCard
       className="page-card-host"
-      title="Session (Host)"
-      description="Tout ce qu’il faut pour animer la partie, en grand et au calme."
-      eyebrow="Hôte"
+      title={pageTitle}
+      description={pageDescription}
+      eyebrow={isQuestionPhase || isRevealPhase ? null : 'Hôte'}
       actions={
-        <div className="toolbar-actions">
-          {status === 'FINISHED' ? (
-            <Button onClick={handleResetSession} type="button" variant="secondary" size="lg">
-              Relancer une session
-            </Button>
-          ) : null}
-          <Button
-            onClick={handleStartQuiz}
-            type="button"
-            variant="primary"
-            size="lg"
-            disabled={!canStartQuiz}
-          >
-            Démarrer le quiz
-          </Button>
-        </div>
+        status === 'FINISHED' || canStartQuiz ? (
+          <div className="toolbar-actions">
+            {status === 'FINISHED' ? (
+              <Button onClick={handleResetSession} type="button" variant="secondary" size="lg">
+                Relancer une session
+              </Button>
+            ) : null}
+            {canStartQuiz ? (
+              <Button
+                onClick={handleStartQuiz}
+                type="button"
+                variant="primary"
+                size="lg"
+              >
+                Démarrer le quiz
+              </Button>
+            ) : null}
+          </div>
+        ) : null
       }
     >
       {error ? <p className="form-error">{error}</p> : null}
 
-      <section className="host-room-layout">
-        <aside className="room-side-panel">
-          {roomCode && inviteLink ? (
-            <QRCodeDisplay joinUrl={inviteLink} roomCode={roomCode} />
-          ) : null}
-
-        </aside>
-
-        <section className="room-main-panel">
-          <div className="room-status-row">
-            <span>{room?.status ?? 'WAITING_ROOM'}</span>
-            <span>
-              Slide {(room?.currentSlideIndex ?? 0) + 1} / {room?.totalSlides ?? 0}
-            </span>
-            <span>
-              Réponses {answerCount?.answersReceived ?? room?.answersCount ?? 0} /{' '}
-              {answerCount?.playersCount ??
-                (room?.players ?? []).filter((player) => player.connected).length ??
-                0}
-            </span>
-          </div>
-
-          {room?.status === 'FINISHED' ? (
-            <EmptyState
-              title="Partie terminée"
-              description="Les résultats sont prêts. Tu peux fermer cette page."
+      {isRevealPhase ? (
+        reveal ? (
+          <div className="host-presentation-stack">
+            <Scoreboard players={room?.players ?? []} title="Scores" />
+            <RevealPanel
+              isHost
+              onOverrideAnswer={handleOverrideAnswerValidation}
+              reveal={reveal}
             />
-          ) : (
-            <EmptyState
-              title="Prêt à lancer"
-              description={
-                canStartQuiz
-                  ? 'Démarre le quiz pour ouvrir la présentation.'
-                  : 'La présentation s’ouvre dans une modal (plus propre pour le QR code et le contrôle host).'
-              }
-            />
-          )}
-
-          <div className="player-list-panel">
-            <h3>Joueurs</h3>
-            {status === 'QUESTION_ACTIVE' ? (
-              <p className="room-answers-hint">
-                Répondu {answerCount?.answersReceived ?? 0} /{' '}
-                {answerCount?.playersCount ??
-                  (room?.players ?? []).filter((player) => player.connected).length ??
-                  0}
-              </p>
-            ) : null}
-            {(room?.players ?? []).length ? (
-              <div className="player-list">
-                {(room?.players ?? []).map((player) => (
-                  <div className="player-row" key={player.playerId}>
-                    <span>{player.nickname}</span>
-                    <small>
-                      {player.connected ? 'connecté' : 'parti'} — {player.score ?? 0} pts
-                      {status === 'QUESTION_ACTIVE' && player.connected ? (
-                        answeredPlayerIds.has(player.playerId) ? ' — a répondu' : ' — en attente'
-                      ) : null}
-                    </small>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p>Aucun joueur pour le moment.</p>
-            )}
-          </div>
-        </section>
-      </section>
-
-      <Modal
-        open={presentationOpen}
-        title={
-          isRevealPhase
-            ? `Révélation — slide ${revealIndex + 1} / ${totalSlides}`
-            : `Quiz — slide ${currentIndex + 1} / ${totalSlides}`
-        }
-        onClose={() => setPresentationOpen(false)}
-        footer={
-          isRevealPhase ? (
-            <div className="ui-modal-footer-row">
-              <div className="ui-modal-footer-left">
-                <Button onClick={handlePrevRevealSlide} type="button" variant="secondary">
-                  Précédent
+            <div className="host-presentation-controls">
+              <Button
+                onClick={handlePrevRevealSlide}
+                type="button"
+                variant="secondary"
+                disabled={revealIndex <= 0}
+              >
+                Précédent
+              </Button>
+              {isLastRevealSlide ? (
+                <Button
+                  onClick={handleFinishQuiz}
+                  type="button"
+                  variant="primary"
+                  disabled={!canGoNextReveal}
+                >
+                  Terminer
                 </Button>
-                <Button onClick={handleRevealCurrentSlide} type="button" variant="secondary">
-                  Révéler (recharger)
-                </Button>
-              </div>
-              <div className="ui-modal-footer-right">
+              ) : (
                 <Button
                   onClick={handleNextRevealSlide}
                   type="button"
@@ -368,64 +305,16 @@ export function HostRoomPage() {
                 >
                   Suivant
                 </Button>
-                <Button onClick={handleFinishQuiz} type="button" variant="primary">
-                  Terminer
-                </Button>
-              </div>
+              )}
             </div>
-          ) : (
-            <div className="ui-modal-footer-row">
-              <div className="ui-modal-footer-left">
-                <Button
-                  onClick={handlePrevSlide}
-                  type="button"
-                  variant="secondary"
-                  disabled={!canNavigateSlides || currentIndex <= 0}
-                >
-                  Précédent
-                </Button>
-                <Button
-                  onClick={handleLockAnswers}
-                  type="button"
-                  variant="secondary"
-                  disabled={!canLockAnswers}
-                >
-                  Verrouiller
-                </Button>
-              </div>
-              <div className="ui-modal-footer-right">
-                {canStartReveal ? (
-                  <Button onClick={handleStartReveal} type="button" variant="primary">
-                    Démarrer le reveal
-                  </Button>
-                ) : null}
-                <Button
-                  onClick={handleNextSlide}
-                  type="button"
-                  variant="primary"
-                  disabled={!canNavigateSlides || (totalSlides > 0 && currentIndex >= totalSlides - 1)}
-                >
-                  Suivant
-                </Button>
-              </div>
-            </div>
-          )
-        }
-      >
-        {isRevealPhase && reveal ? (
-          <>
-            <Scoreboard players={room?.players ?? []} title="Scores" />
-            <RevealPanel
-              isHost
-              onOverrideAnswer={handleOverrideAnswerValidation}
-              reveal={reveal}
-            />
-          </>
-        ) : status === 'FINISHED' ? (
-          <EmptyState title="Partie terminée" description="Tu peux fermer la présentation." />
+          </div>
         ) : (
+          <EmptyState title="En attente" description="En attente de la première slide révélée…" />
+        )
+      ) : isQuestionPhase ? (
+        <div className="host-presentation-stack">
           <div
-            className="slide-canvas-stage host-live-stage"
+            className="slide-canvas-stage player-live-stage"
             style={{ background: currentSlide?.backgroundColor ?? undefined }}
           >
             <SlideCanvas
@@ -495,8 +384,95 @@ export function HostRoomPage() {
               </div>
             ) : null}
           </div>
-        )}
-      </Modal>
+
+          <div className="host-presentation-controls">
+            <Button
+              onClick={handlePrevSlide}
+              type="button"
+              variant="secondary"
+              disabled={!canNavigateSlides || currentIndex <= 0}
+            >
+              Précédent
+            </Button>
+            {isLastSlide ? (
+              <Button
+                onClick={handleStartReveal}
+                type="button"
+                variant="primary"
+                disabled={!canNavigateSlides}
+              >
+                Terminer
+              </Button>
+            ) : (
+              <Button
+                onClick={handleNextSlide}
+                type="button"
+                variant="primary"
+                disabled={!canNavigateSlides}
+              >
+                Suivant
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <section className="host-room-layout">
+          <aside className="room-side-panel">
+            {roomCode && inviteLink ? (
+              <QRCodeDisplay joinUrl={inviteLink} roomCode={roomCode} />
+            ) : null}
+          </aside>
+
+          <section className="room-main-panel">
+            <div className="room-status-row">
+              <span>{room?.status ?? 'WAITING_ROOM'}</span>
+              <span>
+                Slide {(room?.currentSlideIndex ?? 0) + 1} / {room?.totalSlides ?? 0}
+              </span>
+              <span>
+                Réponses {answerCount?.answersReceived ?? room?.answersCount ?? 0} /{' '}
+                {answerCount?.playersCount ??
+                  (room?.players ?? []).filter((player) => player.connected).length ??
+                  0}
+              </span>
+            </div>
+
+            {room?.status === 'FINISHED' ? (
+              <EmptyState
+                title="Partie terminée"
+                description="Les résultats sont prêts. Tu peux fermer cette page."
+              />
+            ) : (
+              <EmptyState
+                title="Prêt à lancer"
+                description={
+                  canStartQuiz
+                    ? 'Démarre le quiz pour ouvrir la présentation.'
+                    : 'La présentation apparaîtra ici.'
+                }
+              />
+            )}
+
+            <div className="player-list-panel">
+              <h3>Joueurs</h3>
+              {(room?.players ?? []).length ? (
+                <div className="player-list">
+                  {(room?.players ?? []).map((player) => (
+                    <div className="player-row" key={player.playerId}>
+                      <span>{player.nickname}</span>
+                      <small>
+                        {player.connected ? 'connecté' : 'parti'} — {player.score ?? 0} pts
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p>Aucun joueur pour le moment.</p>
+              )}
+            </div>
+          </section>
+        </section>
+      )}
     </PageCard>
   )
 }

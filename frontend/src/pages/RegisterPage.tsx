@@ -1,19 +1,22 @@
 import { type FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { PageCard } from '../components/ui/PageCard'
 import { Button } from '../components/ui/Button'
 import { FormField, Input } from '../components/ui/FormField'
 import { authApi } from '../services/authApi'
 import { useAuthStore } from '../stores/authStore'
+import { getAuthRedirectPath, preserveAuthRedirectState } from '../utils/authRedirect'
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const setSession = useAuthStore((state) => state.setSession)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const authRedirectState = preserveAuthRedirectState(location.state)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -23,7 +26,7 @@ export function RegisterPage() {
     try {
       const response = await authApi.register({ username, password })
       setSession(response.accessToken, response.user)
-      navigate('/dashboard', { replace: true })
+      navigate(getAuthRedirectPath(location.state), { replace: true })
     } catch {
       setError('Impossible de créer ce compte. Ce pseudo est peut-être déjà pris.')
     } finally {
@@ -69,7 +72,7 @@ export function RegisterPage() {
         </Button>
       </form>
 
-      <Link to="/login" className="text-link">
+      <Link className="text-link" state={authRedirectState} to="/login">
         Déjà un compte ?
       </Link>
     </PageCard>

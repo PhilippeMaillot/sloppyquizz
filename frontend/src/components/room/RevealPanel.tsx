@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import type { RevealPayload } from '../../types/room'
-import { CorrectAnswerDisplay } from './CorrectAnswerDisplay'
 import { PlayerAnswersList } from './PlayerAnswersList'
 import { RevealedSlide } from './RevealedSlide'
 
@@ -8,7 +7,7 @@ type RevealPanelProps = {
   reveal: RevealPayload
   currentPlayerId?: string
   isHost?: boolean
-  onOverrideAnswer?: (answerId: string, isCorrect: boolean) => void
+  onOverrideAnswer?: (answerId: string, isCorrect: boolean, pointsAwarded?: number) => void
 }
 
 export function RevealPanel({
@@ -44,34 +43,18 @@ export function RevealPanel({
     })
   }, [answerIdToLabel, reveal.slide.answerMode, reveal.slide.type, sortedAnswers])
 
-  const validatedCount = reveal.validationState.validatedAnswers
-  const totalCount = reveal.validationState.totalAnswers
-
   return (
     <section className="reveal-panel">
-      <div className="reveal-panel-header">
-        <span>Phase de reveal</span>
-        <strong>
-          Slide {reveal.revealSlideIndex + 1} / {reveal.totalSlides}
-        </strong>
-      </div>
-
       <RevealedSlide slide={reveal.slide} />
-      <CorrectAnswerDisplay correctAnswer={reveal.correctAnswer} />
-      <div className="reveal-validation-toolbar">
-        <div className="reveal-validation-status">
-          <span>
-            Validées {validatedCount} / {totalCount}
-          </span>
-        </div>
-      </div>
 
       <PlayerAnswersList
         answers={answersForDisplay}
         currentPlayerId={currentPlayerId}
         pointsForSlide={reveal.slide.points ?? null}
         showActions={isHost}
-        onMarkCorrect={(answerId) => onOverrideAnswer?.(answerId, true)}
+        onMarkCorrect={(answerId, pointsAwarded) =>
+          onOverrideAnswer?.(answerId, true, pointsAwarded)
+        }
         onMarkIncorrect={(answerId) => onOverrideAnswer?.(answerId, false)}
       />
     </section>
