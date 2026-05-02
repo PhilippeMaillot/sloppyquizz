@@ -33,6 +33,26 @@ class YoutubeAudioPreview:
 class AudioService:
     MAX_DURATION_SECONDS = 60
 
+    def _preview_ytdlp_commands(self, source_url: str) -> list[list[str]]:
+        base = [
+            "yt-dlp",
+            "--dump-single-json",
+            "--no-playlist",
+            "--no-warnings",
+            "--retries",
+            "3",
+            "--socket-timeout",
+            "10",
+            "-f",
+            "bestaudio/best",
+        ]
+
+        return [
+            [*base, source_url],
+            [*base, "--extractor-args", "youtube:player_client=android", source_url],
+            [*base, "--extractor-args", "youtube:player_client=web", source_url],
+        ]
+
     def ensure_ytdlp(self) -> None:
         if shutil.which("yt-dlp") is None:
             raise HTTPException(
@@ -72,36 +92,36 @@ class AudioService:
         self.ensure_ytdlp()
         self.validate_source_url(source_url)
 
-        ytdlp_cmd = [
-            "yt-dlp",
-            "--dump-single-json",
-            "--no-playlist",
-            "--no-warnings",
-            "-f",
-            "bestaudio/best",
-            source_url,
-        ]
-        try:
-            ytdlp = subprocess.run(
-                ytdlp_cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=90,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="yt-dlp took too long to return audio metadata",
-            ) from error
-        if ytdlp.returncode != 0:
+        last_error: str | None = None
+        ytdlp_output: str | None = None
+
+        for ytdlp_cmd in self._preview_ytdlp_commands(source_url):
+            try:
+                ytdlp = subprocess.run(
+                    ytdlp_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                last_error = "yt-dlp took too long to return audio metadata"
+                continue
+
+            if ytdlp.returncode == 0 and ytdlp.stdout.strip():
+                ytdlp_output = ytdlp.stdout
+                break
+
+            last_error = ytdlp.stderr.strip() or ytdlp.stdout.strip() or "unknown error"
+
+        if ytdlp_output is None:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"yt-dlp failed: {ytdlp.stderr.strip() or ytdlp.stdout.strip() or 'unknown error'}",
+                detail=f"yt-dlp failed: {last_error or 'unknown error'}",
             )
 
         try:
-            info = json.loads(ytdlp.stdout)
+            info = json.loads(ytdlp_output)
         except json.JSONDecodeError as error:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
