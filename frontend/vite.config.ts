@@ -17,6 +17,11 @@ export default defineConfig({
         target: 'http://backend:8000',
         changeOrigin: true,
       },
+      '/socket.io': {
+        target: 'http://backend:8000',
+        changeOrigin: true,
+        ws: true,
+      },
       '/uploads': {
         target: 'http://backend:8000',
         changeOrigin: true,
