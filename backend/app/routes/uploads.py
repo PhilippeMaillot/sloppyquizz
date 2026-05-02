@@ -13,7 +13,9 @@ from app.models.user import UserPublic
 router = APIRouter()
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_VIDEO_BYTES = 100 * 1024 * 1024
 ALLOWED_IMAGE_MIME = {"image/png", "image/jpeg", "image/webp"}
+ALLOWED_VIDEO_MIME = {"video/mp4"}
 
 
 @router.get("/status")
@@ -28,10 +30,12 @@ def _extension_for_mime(mime: str) -> str:
         return "jpg"
     if mime == "image/webp":
         return "webp"
+    if mime == "video/mp4":
+        return "mp4"
     raise ValueError("Unsupported mime type")
 
 
-def _looks_like_image(first_bytes: bytes, mime: str) -> bool:
+def _looks_like_upload(first_bytes: bytes, mime: str) -> bool:
     if mime == "image/png":
         return first_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     if mime == "image/jpeg":
@@ -39,14 +43,24 @@ def _looks_like_image(first_bytes: bytes, mime: str) -> bool:
     if mime == "image/webp":
         # RIFF....WEBP
         return len(first_bytes) >= 12 and first_bytes[0:4] == b"RIFF" and first_bytes[8:12] == b"WEBP"
+    if mime == "video/mp4":
+        # ISO BMFF/MP4 files declare an ftyp box near the start.
+        return len(first_bytes) >= 12 and first_bytes[4:8] == b"ftyp"
     return False
 
 
-async def _store_upload(file: UploadFile, folder: Path) -> str:
-    if not file.content_type or file.content_type not in ALLOWED_IMAGE_MIME:
+async def _store_upload(
+    file: UploadFile,
+    folder: Path,
+    *,
+    allowed_mime: set[str],
+    max_bytes: int,
+    label: str,
+) -> str:
+    if not file.content_type or file.content_type not in allowed_mime:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported image type",
+            detail=f"Unsupported {label} type",
         )
 
     folder.mkdir(parents=True, exist_ok=True)
@@ -60,20 +74,20 @@ async def _store_upload(file: UploadFile, folder: Path) -> str:
 
     try:
         first = await file.read(32)
-        if not _looks_like_image(first, file.content_type):
+        if not _looks_like_upload(first, file.content_type):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid image file",
+                detail=f"Invalid {label} file",
             )
 
         with tmp_path.open("wb") as out:
             if first:
                 out.write(first)
                 size += len(first)
-            if size > MAX_IMAGE_BYTES:
+            if size > max_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail="Image too large",
+                    detail=f"{label.title()} too large",
                 )
 
             while True:
@@ -82,10 +96,10 @@ async def _store_upload(file: UploadFile, folder: Path) -> str:
                     break
                 out.write(chunk)
                 size += len(chunk)
-                if size > MAX_IMAGE_BYTES:
+                if size > max_bytes:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail="Image too large",
+                        detail=f"{label.title()} too large",
                     )
 
         tmp_path.replace(final_path)
@@ -109,7 +123,13 @@ async def upload_image(
     file: UploadFile = File(...),
     _: UserPublic = Depends(get_current_user),
 ) -> dict[str, str]:
-    url = await _store_upload(file, settings.upload_dir / "images")
+    url = await _store_upload(
+        file,
+        settings.upload_dir / "images",
+        allowed_mime=ALLOWED_IMAGE_MIME,
+        max_bytes=MAX_IMAGE_BYTES,
+        label="image",
+    )
     return {"url": url}
 
 
@@ -118,6 +138,27 @@ async def upload_cover(
     file: UploadFile = File(...),
     _: UserPublic = Depends(get_current_user),
 ) -> dict[str, str]:
-    url = await _store_upload(file, settings.upload_dir / "covers")
+    url = await _store_upload(
+        file,
+        settings.upload_dir / "covers",
+        allowed_mime=ALLOWED_IMAGE_MIME,
+        max_bytes=MAX_IMAGE_BYTES,
+        label="image",
+    )
+    return {"url": url}
+
+
+@router.post("/video")
+async def upload_video(
+    file: UploadFile = File(...),
+    _: UserPublic = Depends(get_current_user),
+) -> dict[str, str]:
+    url = await _store_upload(
+        file,
+        settings.upload_dir / "videos",
+        allowed_mime=ALLOWED_VIDEO_MIME,
+        max_bytes=MAX_VIDEO_BYTES,
+        label="video",
+    )
     return {"url": url}
 

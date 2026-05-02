@@ -315,6 +315,13 @@ def _extract_audio_position(payload: dict) -> float:
     return float(position)
 
 
+def _extract_canvas_element_id(payload: dict) -> str:
+    element_id = payload.get("elementId")
+    if not isinstance(element_id, str) or not element_id.strip():
+        raise ValueError("elementId is required")
+    return element_id.strip()
+
+
 @sio.on("host:audio_play")
 async def host_audio_play(sid: str, payload: dict):
     try:
@@ -357,6 +364,21 @@ async def host_audio_seek(sid: str, payload: dict):
             _extract_room_code(payload),
             action="seek",
             position=_extract_audio_position(payload),
+        )
+    except (PermissionError, ValueError) as error:
+        await _emit_error(sid, str(error))
+        return {"ok": False, "error": str(error)}
+
+
+@sio.on("host:canvas_element_hide")
+async def host_canvas_element_hide(sid: str, payload: dict):
+    try:
+        return await room_manager.canvas_element_hide(
+            sio,
+            get_database(),
+            sid,
+            _extract_room_code(payload),
+            element_id=_extract_canvas_element_id(payload),
         )
     except (PermissionError, ValueError) as error:
         await _emit_error(sid, str(error))

@@ -33,6 +33,7 @@ export function HostRoomPage() {
   const [answeredPlayerIds, setAnsweredPlayerIds] = useState<Set<string>>(new Set())
   const [reveal, setReveal] = useState<RevealPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [hiddenElementIds, setHiddenElementIds] = useState<string[]>([])
   const hostAudioRef = useRef<HTMLAudioElement | null>(null)
   const suppressSeekRef = useRef(false)
 
@@ -80,6 +81,7 @@ export function HostRoomPage() {
       setCurrentSlide(payload.slide)
       setReveal(null)
       setAnsweredPlayerIds(new Set())
+      setHiddenElementIds([])
     }
     const handleAnswerCountUpdated = (payload: AnswerCountPayload) =>
       (setAnswerCount(payload), setAnsweredPlayerIds(new Set(payload.answeredPlayerIds ?? [])))
@@ -228,6 +230,7 @@ export function HostRoomPage() {
     setReveal(null)
     setCurrentSlide(null)
     setAnswerCount(null)
+    setHiddenElementIds([])
   }
 
   function emitAudio(action: 'play' | 'pause' | 'seek') {
@@ -236,6 +239,15 @@ export function HostRoomPage() {
     socketClient.emit(`host:audio_${action}`, {
       roomCode,
       position: audio.currentTime ?? 0,
+    })
+  }
+
+  function hideCanvasElement(elementId: string) {
+    if (!roomCode) return
+    setHiddenElementIds((current) => (current.includes(elementId) ? current : [...current, elementId]))
+    socketClient.emit('host:canvas_element_hide', {
+      roomCode,
+      elementId,
     })
   }
 
@@ -318,9 +330,12 @@ export function HostRoomPage() {
             style={{ background: currentSlide?.backgroundColor ?? undefined }}
           >
             <SlideCanvas
-              elements={(currentSlide?.elements as any) ?? null}
+              elements={currentSlide?.elements ?? null}
+              hiddenElementIds={hiddenElementIds}
               legacyImageUrl={currentSlide?.imageUrl ?? null}
               legacyQuestion={currentSlide?.question ?? null}
+              onHostHideElement={hideCanvasElement}
+              showVideoControls
             />
 
             {status === 'QUESTION_ACTIVE' ? (

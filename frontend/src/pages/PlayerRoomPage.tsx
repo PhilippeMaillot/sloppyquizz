@@ -14,6 +14,7 @@ import { useAuthStore } from '../stores/authStore'
 import type {
   AnswerReceivedPayload,
   AudioControlPayload,
+  CanvasElementHiddenPayload,
   ScoreUpdatedPayload,
   RevealPayload,
   RoomSummary,
@@ -50,6 +51,7 @@ export function PlayerRoomPage() {
   const [audioBlocked, setAudioBlocked] = useState(false)
   const [audioUnlocked, setAudioUnlocked] = useState(false)
   const pendingAudioRef = useRef<AudioControlPayload | null>(null)
+  const [hiddenElementIds, setHiddenElementIds] = useState<string[]>([])
 
   const playerAudioSrc =
     currentSlide?.audio?.storedFileUrl
@@ -75,6 +77,7 @@ export function PlayerRoomPage() {
       setIsSubmitting(false)
       setIsLocked(false)
       setError(null)
+      setHiddenElementIds([])
     }
     const handleAnswerReceived = (payload: AnswerReceivedPayload) => {
       setSubmittedAnswer(payload)
@@ -89,6 +92,7 @@ export function PlayerRoomPage() {
       setCurrentSlide(null)
       setIsLocked(true)
       setIsSubmitting(false)
+      setHiddenElementIds([])
     }
     const handleSlideRevealed = (payload: RevealPayload) => setReveal(payload)
     const handleRevealFinished = (state: RoomSummary) => {
@@ -120,6 +124,15 @@ export function PlayerRoomPage() {
     }
     const handleError = (payload: { message?: string }) =>
       setError(payload.message ?? 'Live room error.')
+
+    const handleCanvasElementHidden = (payload: CanvasElementHiddenPayload) => {
+      if (payload.slideId && currentSlide?.id && payload.slideId !== currentSlide.id) {
+        return
+      }
+      setHiddenElementIds((current) =>
+        current.includes(payload.elementId) ? current : [...current, payload.elementId],
+      )
+    }
 
     const handleAudioControl = async (payload: AudioControlPayload) => {
       const audio = playerAudioRef.current
@@ -170,6 +183,7 @@ export function PlayerRoomPage() {
     socketClient.on('quiz:score_updated', handleScoreUpdated)
     socketClient.on('quiz:finished', handleQuizFinished)
     socketClient.on('quiz:audio_control', handleAudioControl)
+    socketClient.on('quiz:canvas_element_hidden', handleCanvasElementHidden)
     socketClient.on('error', handleError)
 
     return () => {
@@ -183,6 +197,7 @@ export function PlayerRoomPage() {
       socketClient.off('quiz:score_updated', handleScoreUpdated)
       socketClient.off('quiz:finished', handleQuizFinished)
       socketClient.off('quiz:audio_control', handleAudioControl)
+      socketClient.off('quiz:canvas_element_hidden', handleCanvasElementHidden)
       socketClient.off('error', handleError)
     }
   }, [currentSlide?.id, navigate])
@@ -334,7 +349,8 @@ export function PlayerRoomPage() {
             style={{ background: currentSlide?.backgroundColor ?? undefined }}
           >
             <SlideCanvas
-              elements={(currentSlide?.elements as any) ?? null}
+              elements={currentSlide?.elements ?? null}
+              hiddenElementIds={hiddenElementIds}
               legacyImageUrl={currentSlide?.imageUrl ?? null}
               legacyQuestion={currentSlide?.question ?? null}
             />
@@ -442,7 +458,8 @@ export function PlayerRoomPage() {
             style={{ background: currentSlide?.backgroundColor ?? undefined }}
           >
             <SlideCanvas
-              elements={(currentSlide?.elements as any) ?? null}
+              elements={currentSlide?.elements ?? null}
+              hiddenElementIds={hiddenElementIds}
               legacyImageUrl={currentSlide?.imageUrl ?? null}
               legacyQuestion={currentSlide?.question ?? null}
             />

@@ -16,6 +16,7 @@ HOST_EVENTS = (
     "host:audio_play",
     "host:audio_pause",
     "host:audio_seek",
+    "host:canvas_element_hide",
 )
 
 PLAYER_EVENTS = (
@@ -42,5 +43,6 @@ SERVER_EVENTS = (
     "quiz:reveal_finished",
     "quiz:finished",
     "quiz:audio_control",
+    "quiz:canvas_element_hidden",
     "error",
 )

@@ -621,9 +621,11 @@ export function QuizEditorPage() {
             style={{ background: selectedSlide.backgroundColor ?? undefined }}
           >
             <SlideCanvas
-              elements={(selectedSlide.elements as any) ?? null}
+              autoPlayVideos
+              elements={selectedSlide.elements ?? null}
               legacyImageUrl={selectedSlide.imageUrl ?? null}
               legacyQuestion={selectedSlide.question ?? null}
+              showVideoControls
             />
           </div>
         ) : (
@@ -658,7 +660,7 @@ function SlideEditor({
   deleteAnswer,
 }: SlideEditorProps) {
   useEffect(() => {
-    const existing = (slide.elements ?? []) as any[]
+    const existing = slide.elements ?? []
     const hasLegacy = existing.some((el) => el?.id === LEGACY_QUESTION_ELEMENT_ID)
     if (!hasLegacy && slide.question?.trim()) {
       updateSlide(syncQuestionElement(slide, slide.question))
@@ -669,6 +671,11 @@ function SlideEditor({
 
   async function uploadImage(file: File) {
     const { url } = await uploadApi.uploadImage(file)
+    return url
+  }
+
+  async function uploadVideo(file: File) {
+    const { url } = await uploadApi.uploadVideo(file)
     return url
   }
 
@@ -703,7 +710,7 @@ function SlideEditor({
         />
       </label>
 
-      <Card title="Slide canvas" description="Place tes images et textes comme sur PowerPoint." tone="soft">
+      <Card title="Slide canvas" description="Place tes images, videos, formes et textes comme sur PowerPoint." tone="soft">
         <div className="slide-settings-row" style={{ marginBottom: 10 }}>
           <label>
             Fond
@@ -725,13 +732,14 @@ function SlideEditor({
           </Button>
         </div>
         <SlideCanvasEditor
-          elements={(slide.elements ?? []) as any}
+          elements={slide.elements ?? []}
           legacyImageUrl={slide.imageUrl}
           legacyQuestion={slide.question}
           backgroundColor={slide.backgroundColor ?? null}
           onChange={(next) => {
-            const legacy = (next as any[]).find(
-              (el) => el?.id === LEGACY_QUESTION_ELEMENT_ID && el?.type === 'text',
+            const legacy = next.find(
+              (el): el is SlideTextElement =>
+                el.id === LEGACY_QUESTION_ELEMENT_ID && el.type === 'text',
             )
             updateSlide(
               {
@@ -742,6 +750,7 @@ function SlideEditor({
             )
           }}
           onUploadImage={uploadImage}
+          onUploadVideo={uploadVideo}
         />
       </Card>
 

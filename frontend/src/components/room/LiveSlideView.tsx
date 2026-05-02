@@ -24,7 +24,7 @@ export function LiveSlideView({ slide, showAudioControls = false }: LiveSlideVie
         style={{ background: slide.backgroundColor ?? undefined }}
       >
         <SlideCanvas
-          elements={(slide.elements as any) ?? null}
+          elements={slide.elements ?? null}
           legacyImageUrl={slide.imageUrl ?? null}
           legacyQuestion={slide.question ?? null}
         />

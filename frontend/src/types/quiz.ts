@@ -9,7 +9,7 @@ export type ChoiceAnswer = {
   isCorrect: boolean
 }
 
-export type SlideElementType = 'image' | 'text'
+export type SlideElementType = 'image' | 'text' | 'video' | 'line' | 'rect'
 
 export type SlideElementBase = {
   id: string
@@ -34,7 +34,36 @@ export type SlideTextElement = SlideElementBase & {
   color?: string
 }
 
-export type SlideElement = SlideImageElement | SlideTextElement
+export type SlideVideoElement = SlideElementBase & {
+  type: 'video'
+  videoUrl: string
+  startTime: number
+  endTime: number
+  duration?: number | null
+}
+
+export type SlideLineElement = SlideElementBase & {
+  type: 'line'
+  color?: string
+  strokeWidth?: number
+  rotation?: number
+}
+
+export type SlideRectElement = SlideElementBase & {
+  type: 'rect'
+  fillColor?: string
+  strokeColor?: string
+  strokeWidth?: number
+  fillEnabled?: boolean
+  hideOnHostClick?: boolean
+}
+
+export type SlideElement =
+  | SlideImageElement
+  | SlideTextElement
+  | SlideVideoElement
+  | SlideLineElement
+  | SlideRectElement
 
 type SlideBase = {
   id: string

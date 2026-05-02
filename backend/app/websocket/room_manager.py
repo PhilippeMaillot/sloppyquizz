@@ -951,6 +951,50 @@ class RoomManager:
         await sio.emit("quiz:audio_control", payload, room=room["code"])
         return {"ok": True}
 
+    async def canvas_element_hide(
+        self,
+        sio: socketio.AsyncServer,
+        database: AsyncIOMotorDatabase,
+        sid: str,
+        room_code: str,
+        *,
+        element_id: str,
+    ) -> dict:
+        room, quiz = await self._get_room_and_quiz(database, room_code)
+        self._ensure_host(room, sid)
+
+        if not element_id:
+            raise ValueError("elementId is required")
+
+        slides = quiz.get("slides", [])
+        index = int(room.get("currentSlideIndex", 0))
+        slide = slides[index] if 0 <= index < len(slides) else None
+        elements = slide.get("elements") if isinstance(slide, dict) else None
+        element = None
+        if isinstance(elements, list):
+            element = next(
+                (
+                    item
+                    for item in elements
+                    if isinstance(item, dict)
+                    and item.get("id") == element_id
+                    and item.get("hideOnHostClick") is True
+                ),
+                None,
+            )
+
+        if element is None:
+            raise ValueError("This element cannot be hidden by the host")
+
+        payload = {
+            "roomCode": room["code"],
+            "slideId": slide.get("id"),
+            "elementId": element_id,
+            "sentAt": datetime.now(timezone.utc).timestamp(),
+        }
+        await sio.emit("quiz:canvas_element_hidden", payload, room=room["code"])
+        return {"ok": True}
+
     async def _get_room_and_quiz(
         self,
         database: AsyncIOMotorDatabase,

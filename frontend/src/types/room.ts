@@ -1,3 +1,5 @@
+import type { SlideElement } from './quiz'
+
 export type RoomStatus =
   | 'WAITING_ROOM'
   | 'QUESTION_ACTIVE'
@@ -55,20 +57,7 @@ export type LiveSlide = {
   description?: string | null
   imageUrl?: string | null
   backgroundColor?: string | null
-  elements?: Array<{
-    id: string
-    type: 'image' | 'text'
-    x: number
-    y: number
-    w: number
-    h: number
-    z: number
-    imageUrl?: string
-    text?: string
-    fontSize?: number
-    align?: 'left' | 'center' | 'right'
-    color?: string
-  }> | null
+  elements?: SlideElement[] | null
   points?: number
   answerMode?: string
   audio?: {
@@ -170,6 +159,13 @@ export type AudioControlPayload = {
   sentAt: number
   slideId?: string
   audioUrl?: string
+}
+
+export type CanvasElementHiddenPayload = {
+  roomCode: string
+  slideId?: string
+  elementId: string
+  sentAt: number
 }
 
 export type PlayerJoinAck = {

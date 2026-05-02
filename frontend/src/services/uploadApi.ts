@@ -18,5 +18,13 @@ export const uploadApi = {
     })
     return response.data
   },
+  uploadVideo: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    const response = await apiClient.post<{ url: string }>(`/uploads/video`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return response.data
+  },
 }
 
