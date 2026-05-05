@@ -41,6 +41,8 @@ const DEFAULT_SHAPE_COLOR = '#1d2340'
 const PASTE_OFFSET = 3
 const SNAP_THRESHOLD = 0.75
 const VIDEO_MIN_CLIP_SECONDS = 0.1
+const MIN_VISIBLE_EDGE = 2
+const ELEMENT_MAX_SIZE = 200
 
 type CanvasBounds = {
   left: number
@@ -98,6 +100,15 @@ function elementBounds(el: SlideElement): CanvasBounds {
     top: el.y,
     right: el.x + el.w,
     bottom: el.y + el.h,
+  }
+}
+
+function elementPositionLimits(w: number, h: number) {
+  return {
+    minX: MIN_VISIBLE_EDGE - w,
+    maxX: 100 - MIN_VISIBLE_EDGE,
+    minY: MIN_VISIBLE_EDGE - h,
+    maxY: 100 - MIN_VISIBLE_EDGE,
   }
 }
 
@@ -201,6 +212,16 @@ function normalizeAngle(value: number) {
   return ((Math.round(value * 10) / 10) % 360 + 360) % 360
 }
 
+function roundToHalf(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.round(value * 2) / 2
+}
+
+function normalizeHalfStep(value: number) {
+  const rounded = roundToHalf(normalizeAngle(value))
+  return rounded >= 360 ? 0 : rounded
+}
+
 type ToolIconName = 'text' | 'line' | 'rect' | 'frame' | 'mask' | 'image' | 'video'
 
 function ToolIcon({ name }: { name: ToolIconName }) {
@@ -267,6 +288,40 @@ function ToolIcon({ name }: { name: ToolIconName }) {
     <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
       <rect fill="none" height="12" rx="1.5" width="16" x="4" y="6" />
       <path d="m10 10 5 2-5 2Z" />
+    </svg>
+  )
+}
+
+type ActionIconName = 'front' | 'back' | 'trash'
+
+function ActionIcon({ name }: { name: ActionIconName }) {
+  if (name === 'front') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <path d="M8 8h10v10H8z" />
+        <path d="M6 16H4V4h12v2" />
+        <path d="m12 5 3-3 3 3" />
+      </svg>
+    )
+  }
+
+  if (name === 'back') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <path d="M6 6h10v10H6z" />
+        <path d="M18 8h2v12H8v-2" />
+        <path d="m12 19 3 3 3-3" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+      <path d="M4 7h16" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M6 7l1 14h10l1-14" />
+      <path d="M9 7V4h6v3" />
     </svg>
   )
 }
@@ -385,14 +440,15 @@ export function SlideCanvasEditor({
     const shiftY =
       copiedBounds && copiedBounds.bottom + PASTE_OFFSET <= 100 ? PASTE_OFFSET : -(copiedBounds?.top ?? 0)
     const firstZ = nextZ(elements)
-    const pasted = copiedElements.map((el, index) =>
-      cloneElementWithPatch(el, {
+    const pasted = copiedElements.map((el, index) => {
+      const limits = elementPositionLimits(el.w, el.h)
+      return cloneElementWithPatch(el, {
         id: `el_${crypto.randomUUID()}`,
-        x: clamp(el.x + shiftX, 0, 100 - el.w),
-        y: clamp(el.y + shiftY, 0, 100 - el.h),
+        x: clamp(el.x + shiftX, limits.minX, limits.maxX),
+        y: clamp(el.y + shiftY, limits.minY, limits.maxY),
         z: firstZ + index,
-      }),
-    )
+      })
+    })
 
     onChange([...elements, ...pasted])
     clipboardRef.current = pasted.map((el) => ({ ...el }))
@@ -512,15 +568,17 @@ export function SlideCanvasEditor({
     opts?: { center?: boolean; point?: { x: number; y: number } | null },
   ) {
     if (opts?.point) {
+      const limits = elementPositionLimits(w, h)
       return {
-        x: clamp(opts.point.x - w / 2, 0, 100 - w),
-        y: clamp(opts.point.y - h / 2, 0, 100 - h),
+        x: clamp(opts.point.x - w / 2, limits.minX, limits.maxX),
+        y: clamp(opts.point.y - h / 2, limits.minY, limits.maxY),
       }
     }
 
+    const limits = elementPositionLimits(w, h)
     return {
-      x: opts?.center ? clamp(50 - w / 2, 0, 100 - w) : 10,
-      y: opts?.center ? clamp(50 - h / 2, 0, 100 - h) : 20,
+      x: opts?.center ? clamp(50 - w / 2, limits.minX, limits.maxX) : 10,
+      y: opts?.center ? clamp(50 - h / 2, limits.minY, limits.maxY) : 20,
     }
   }
 
@@ -628,10 +686,10 @@ export function SlideCanvasEditor({
     const rect = stage.getBoundingClientRect()
     const startPositions = new Map(dragElements.map((el) => [el.id, { x: el.x, y: el.y, w: el.w, h: el.h }]))
     const startBounds = elementsBounds(dragElements)
-    const minDx = Math.max(...dragElements.map((el) => -el.x))
-    const maxDx = Math.min(...dragElements.map((el) => 100 - el.w - el.x))
-    const minDy = Math.max(...dragElements.map((el) => -el.y))
-    const maxDy = Math.min(...dragElements.map((el) => 100 - el.h - el.y))
+    const minDx = Math.max(...dragElements.map((el) => MIN_VISIBLE_EDGE - el.w - el.x))
+    const maxDx = Math.min(...dragElements.map((el) => 100 - MIN_VISIBLE_EDGE - el.x))
+    const minDy = Math.max(...dragElements.map((el) => MIN_VISIBLE_EDGE - el.h - el.y))
+    const maxDy = Math.min(...dragElements.map((el) => 100 - MIN_VISIBLE_EDGE - el.y))
 
     const onMove = (e: PointerEvent) => {
       const dxPct = ((e.clientX - startClientX) / rect.width) * 100
@@ -682,8 +740,8 @@ export function SlideCanvasEditor({
     const onMove = (e: PointerEvent) => {
       const dwPct = ((e.clientX - startClientX) / rect.width) * 100
       const dhPct = ((e.clientY - startClientY) / rect.height) * 100
-      const rawW = clamp(startW + dwPct, minSize, 100 - el.x)
-      const rawH = clamp(startH + dhPct, minSize, 100 - el.y)
+      const rawW = clamp(startW + dwPct, minSize, ELEMENT_MAX_SIZE)
+      const rawH = clamp(startH + dhPct, minSize, ELEMENT_MAX_SIZE)
       const snap = snapBounds(
         {
           left: el.x,
@@ -694,8 +752,11 @@ export function SlideCanvasEditor({
         new Set([id]),
         { xPoints: ['right'], yPoints: ['bottom'] },
       )
-      const nextW = clamp(rawW + snap.dx, minSize, 100 - el.x)
-      const nextH = clamp(rawH + snap.dy, minSize, 100 - el.y)
+      const nextW =
+        el.type === 'line'
+          ? roundToHalf(clamp(rawW + snap.dx, minSize, ELEMENT_MAX_SIZE))
+          : clamp(rawW + snap.dx, minSize, ELEMENT_MAX_SIZE)
+      const nextH = clamp(rawH + snap.dy, minSize, ELEMENT_MAX_SIZE)
       setGuides(snap.guides)
       updateElement(id, { w: nextW, h: nextH })
     }
@@ -743,12 +804,12 @@ export function SlideCanvasEditor({
       const vx = endX - startX
       const vy = endY - startY
       const nextLengthPx = Math.max(12, Math.hypot(vx, vy))
-      const nextW = clamp((nextLengthPx / rect.width) * 100, 2, 140)
+      const nextW = clamp(roundToHalf((nextLengthPx / rect.width) * 100), 2, 140)
       const centerPctX = ((startX + endX) / 2 / rect.width) * 100
       const centerPctY = ((startY + endY) / 2 / rect.height) * 100
       const nextX = clamp(centerPctX - nextW / 2, -40, 140)
       const nextY = clamp(centerPctY - lineHeight / 2, -20, 120)
-      const nextRotation = normalizeAngle((Math.atan2(vy, vx) * 180) / Math.PI)
+      const nextRotation = normalizeHalfStep((Math.atan2(vy, vx) * 180) / Math.PI)
 
       onChange(
         elements.map((item) =>
@@ -1013,14 +1074,35 @@ export function SlideCanvasEditor({
         </label>
         {selectedIds.length ? (
           <>
-            <Button onClick={bringToFront} type="button" variant="secondary">
-              Avant
+            <Button
+              aria-label="Mettre au premier plan"
+              className="slide-canvas-tool-button"
+              onClick={bringToFront}
+              title="Premier plan"
+              type="button"
+              variant="secondary"
+            >
+              <ActionIcon name="front" />
             </Button>
-            <Button onClick={sendToBack} type="button" variant="secondary">
-              Arrière
+            <Button
+              aria-label="Mettre à l'arrière-plan"
+              className="slide-canvas-tool-button"
+              onClick={sendToBack}
+              title="Arrière-plan"
+              type="button"
+              variant="secondary"
+            >
+              <ActionIcon name="back" />
             </Button>
-            <Button onClick={removeSelected} type="button" variant="danger">
-              Supprimer
+            <Button
+              aria-label="Supprimer la sélection"
+              className="slide-canvas-tool-button"
+              onClick={removeSelected}
+              title="Supprimer"
+              type="button"
+              variant="danger"
+            >
+              <ActionIcon name="trash" />
             </Button>
           </>
         ) : null}
@@ -1271,20 +1353,20 @@ function ShapeInspector({
           <Input
             min={2}
             max={140}
-            onChange={(event) => onUpdate({ w: Number(event.target.value) })}
+            onChange={(event) => onUpdate({ w: roundToHalf(Number(event.target.value)) })}
             step={0.5}
             type="number"
-            value={Math.round(element.w * 10) / 10}
+            value={roundToHalf(element.w)}
           />
         </FormField>
         <FormField label="Angle">
           <Input
             min={0}
             max={359.9}
-            onChange={(event) => onUpdate({ rotation: normalizeAngle(Number(event.target.value)) })}
-            step={0.1}
+            onChange={(event) => onUpdate({ rotation: normalizeHalfStep(Number(event.target.value)) })}
+            step={0.5}
             type="number"
-            value={normalizeAngle(element.rotation ?? 0)}
+            value={normalizeHalfStep(element.rotation ?? 0)}
           />
         </FormField>
       </div>
@@ -1627,4 +1709,3 @@ function VideoClipInspector({
     </div>
   )
 }
-
