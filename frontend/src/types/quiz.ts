@@ -32,6 +32,11 @@ export type SlideTextElement = SlideElementBase & {
   fontSize?: number
   align?: 'left' | 'center' | 'right'
   color?: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  strikethrough?: boolean
+  highlightColor?: string | null
 }
 
 export type SlideVideoElement = SlideElementBase & {
@@ -51,6 +56,7 @@ export type SlideLineElement = SlideElementBase & {
 
 export type SlideRectElement = SlideElementBase & {
   type: 'rect'
+  shape?: 'rect' | 'ellipse'
   fillColor?: string
   strokeColor?: string
   strokeWidth?: number

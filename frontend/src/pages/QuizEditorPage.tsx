@@ -54,7 +54,7 @@ function createSlide(type: QuestionSlideType, order: number): QuizSlide {
     imageUrl: null,
     backgroundColor: null,
     elements: [],
-    points: 100,
+    points: 1,
     order,
   }
 
@@ -143,6 +143,57 @@ function syncQuestionElement(slide: QuizSlide, question: string): QuizSlide {
 
 function reorderSlides(slides: QuizSlide[]) {
   return slides.map((slide, index) => ({ ...slide, order: index }))
+}
+
+function getDuplicateSlideTitle(title: string, slides: QuizSlide[]) {
+  const trimmedTitle = title.trim() || 'Slide'
+  const baseTitle = trimmedTitle.replace(/\s\(\d+\)$/, '')
+  const existingTitles = new Set(slides.map((slide) => slide.title.trim()))
+  let index = 1
+  let nextTitle = `${baseTitle} (${index})`
+
+  while (existingTitles.has(nextTitle)) {
+    index += 1
+    nextTitle = `${baseTitle} (${index})`
+  }
+
+  return nextTitle
+}
+
+function duplicateElements(elements: SlideElement[] | null | undefined) {
+  return (elements ?? []).map((element) => ({
+    ...element,
+    id: element.id === LEGACY_QUESTION_ELEMENT_ID ? LEGACY_QUESTION_ELEMENT_ID : createId('el'),
+  })) as SlideElement[]
+}
+
+function duplicateSlide(source: QuizSlide, order: number, title: string): QuizSlide {
+  const base = {
+    ...source,
+    id: createId('slide'),
+    title,
+    order,
+    elements: duplicateElements(source.elements),
+  }
+
+  if (source.type === 'text_answer') {
+    return { ...base, type: source.type } as QuizSlide
+  }
+
+  if (source.type === 'blind_test') {
+    return {
+      ...base,
+      type: source.type,
+      audio: source.audio ? { ...source.audio } : null,
+      answers: source.answers.map((answer) => ({ ...answer, id: createId('answer') })),
+    } as QuizSlide
+  }
+
+  return {
+    ...base,
+    type: source.type,
+    answers: source.answers.map((answer) => ({ ...answer, id: createId('answer') })),
+  } as QuizSlide
 }
 
 function validateSlides(title: string, slides: QuizSlide[]) {
@@ -279,6 +330,26 @@ export function QuizEditorPage() {
     const slide = createSlide(type, slides.length)
     setSlides((currentSlides) => [...currentSlides, slide])
     setSelectedSlideId(slide.id)
+    setSuccessMessage(null)
+  }
+
+  function duplicateExistingSlide(slideId: string) {
+    setSlides((currentSlides) => {
+      const sourceIndex = currentSlides.findIndex((slide) => slide.id === slideId)
+      if (sourceIndex === -1) return currentSlides
+
+      const source = currentSlides[sourceIndex]
+      const nextTitle = getDuplicateSlideTitle(source.title, currentSlides)
+      const duplicatedSlide = duplicateSlide(source, sourceIndex + 1, nextTitle)
+      const nextSlides = reorderSlides([
+        ...currentSlides.slice(0, sourceIndex + 1),
+        duplicatedSlide,
+        ...currentSlides.slice(sourceIndex + 1),
+      ])
+
+      setSelectedSlideId(duplicatedSlide.id)
+      return nextSlides
+    })
     setSuccessMessage(null)
   }
 
@@ -481,7 +552,32 @@ export function QuizEditorPage() {
                       <strong>{slide.title || 'Slide sans titre'}</strong>
                     </button>
                     <button
-                      className="slide-list-trash"
+                      className="slide-list-icon-button"
+                      type="button"
+                      aria-label="Dupliquer la slide"
+                      title="Dupliquer la slide"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        duplicateExistingSlide(slide.id)
+                      }}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M8 8h10v12H8z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M6 16H4V4h12v2"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      className="slide-list-icon-button slide-list-trash"
                       type="button"
                       aria-label="Supprimer la slide"
                       title="Supprimer la slide"
@@ -710,7 +806,22 @@ function SlideEditor({
         />
       </label>
 
-      <Card title="Slide canvas" description="Place tes images, videos, formes et textes comme sur PowerPoint." tone="soft">
+      <label>
+        Points
+        <input
+          min={1}
+          onChange={(event) =>
+            updateSlide({
+              ...slide,
+              points: Number(event.target.value),
+            } as QuizSlide)
+          }
+          type="number"
+          value={slide.points}
+        />
+      </label>
+
+      <Card>
         <div className="slide-settings-row" style={{ marginBottom: 10 }}>
           <label>
             Fond
@@ -732,6 +843,7 @@ function SlideEditor({
           </Button>
         </div>
         <SlideCanvasEditor
+          slideId={slide.id}
           elements={slide.elements ?? []}
           legacyImageUrl={slide.imageUrl}
           legacyQuestion={slide.question}
@@ -753,24 +865,6 @@ function SlideEditor({
           onUploadVideo={uploadVideo}
         />
       </Card>
-
-      <div className="slide-settings-row">
-        <label>
-          Points
-          <input
-            min={0}
-            onChange={(event) =>
-              updateSlide({
-                ...slide,
-                points: Number(event.target.value),
-              } as QuizSlide)
-            }
-            type="number"
-            value={slide.points}
-          />
-        </label>
-
-      </div>
 
       {isBlindTestSlide(slide) ? (
         <BlindTestEditor

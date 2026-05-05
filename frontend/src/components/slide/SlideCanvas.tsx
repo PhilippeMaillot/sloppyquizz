@@ -226,6 +226,7 @@ export function SlideCanvas({
                 borderColor: el.strokeColor ?? DEFAULT_SHAPE_COLOR,
                 borderStyle: 'solid',
                 borderWidth: `${Math.max(0, el.strokeWidth ?? 0)}px`,
+                borderRadius: el.shape === 'ellipse' ? '50%' : undefined,
               }}
               tabIndex={isClickableMask ? 0 : undefined}
               title={isClickableMask ? 'Cliquer pour masquer' : undefined}
@@ -234,6 +235,10 @@ export function SlideCanvas({
         }
 
         const align = el.align ?? 'left'
+        const textDecorations = [
+          el.underline ? 'underline' : null,
+          el.strikethrough ? 'line-through' : null,
+        ].filter(Boolean)
         return (
           <div className="slide-canvas-el slide-canvas-text" key={el.id} style={style}>
             <div
@@ -241,6 +246,10 @@ export function SlideCanvas({
               style={{
                 color: el.color ?? undefined,
                 fontSize: toCanvasFontSize(el.fontSize),
+                fontStyle: el.italic ? 'italic' : undefined,
+                fontWeight: el.bold === false ? 500 : 1000,
+                textDecorationLine: textDecorations.length ? textDecorations.join(' ') : undefined,
+                background: el.highlightColor || undefined,
               }}
             >
               {el.text}
@@ -251,4 +260,3 @@ export function SlideCanvas({
     </div>
   )
 }
-

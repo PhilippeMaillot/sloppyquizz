@@ -57,6 +57,7 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL}
       VITE_SOCKET_URL: ${VITE_SOCKET_URL}
+      VITE_GIPHY_API_KEY: ${VITE_GIPHY_API_KEY}
     ports:
       - "${FRONTEND_PORT}:5173"
 

@@ -13,11 +13,13 @@ import type {
   SlideVideoElement,
 } from '../../types/quiz'
 import { getBackendOrigin } from '../../services/audioApi'
+import { giphyApi, type GiphyGif } from '../../services/giphyApi'
 import { Button } from '../ui/Button'
 import { FormField, Input } from '../ui/FormField'
 import { SlideCanvas } from '../slide/SlideCanvas'
 
 type SlideCanvasEditorProps = {
+  slideId?: string
   elements: SlideElement[]
   legacyImageUrl?: string | null
   legacyQuestion?: string | null
@@ -37,6 +39,7 @@ function nextZ(elements: SlideElement[]) {
 
 const CANVAS_BASE_WIDTH = 1920
 const DEFAULT_TEXT_COLOR = '#1d2340'
+const DEFAULT_HIGHLIGHT_COLOR = '#fff176'
 const DEFAULT_SHAPE_COLOR = '#1d2340'
 const PASTE_OFFSET = 3
 const SNAP_THRESHOLD = 0.75
@@ -222,7 +225,7 @@ function normalizeHalfStep(value: number) {
   return rounded >= 360 ? 0 : rounded
 }
 
-type ToolIconName = 'text' | 'line' | 'rect' | 'frame' | 'mask' | 'image' | 'video'
+type ToolIconName = 'text' | 'line' | 'rect' | 'ellipse' | 'frame' | 'mask' | 'image' | 'gif' | 'video'
 
 function ToolIcon({ name }: { name: ToolIconName }) {
   if (name === 'text') {
@@ -257,6 +260,14 @@ function ToolIcon({ name }: { name: ToolIconName }) {
     )
   }
 
+  if (name === 'ellipse') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <ellipse className="slide-canvas-tool-fill" cx="12" cy="12" rx="8" ry="6" />
+      </svg>
+    )
+  }
+
   if (name === 'frame') {
     return (
       <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
@@ -284,6 +295,23 @@ function ToolIcon({ name }: { name: ToolIconName }) {
     )
   }
 
+  if (name === 'gif') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <rect fill="none" height="14" rx="1.5" width="18" x="3" y="5" />
+        <text
+          className="slide-canvas-tool-gif-text"
+          dominantBaseline="middle"
+          textAnchor="middle"
+          x="12"
+          y="12.5"
+        >
+          GIF
+        </text>
+      </svg>
+    )
+  }
+
   return (
     <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
       <rect fill="none" height="12" rx="1.5" width="16" x="4" y="6" />
@@ -292,9 +320,27 @@ function ToolIcon({ name }: { name: ToolIconName }) {
   )
 }
 
-type ActionIconName = 'front' | 'back' | 'trash'
+type ActionIconName = 'undo' | 'redo' | 'front' | 'back' | 'trash'
 
 function ActionIcon({ name }: { name: ActionIconName }) {
+  if (name === 'undo') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <path d="M9 7 5 11l4 4" />
+        <path d="M5 11h9a5 5 0 0 1 0 10h-2" />
+      </svg>
+    )
+  }
+
+  if (name === 'redo') {
+    return (
+      <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
+        <path d="m15 7 4 4-4 4" />
+        <path d="M19 11h-9a5 5 0 0 0 0 10h2" />
+      </svg>
+    )
+  }
+
   if (name === 'front') {
     return (
       <svg aria-hidden="true" className="slide-canvas-tool-icon" focusable="false" viewBox="0 0 24 24">
@@ -327,6 +373,7 @@ function ActionIcon({ name }: { name: ActionIconName }) {
 }
 
 export function SlideCanvasEditor({
+  slideId = 'default',
   elements,
   legacyImageUrl,
   legacyQuestion,
@@ -337,13 +384,20 @@ export function SlideCanvasEditor({
 }: SlideCanvasEditorProps) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const clipboardRef = useRef<SlideElement[]>([])
+  const historyBySlideRef = useRef<Record<string, { undo: SlideElement[][]; redo: SlideElement[][] }>>({})
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 })
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [stageFocused, setStageFocused] = useState(false)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
   const [guides, setGuides] = useState<AlignmentGuide[]>([])
+  const [imagePickerOpen, setImagePickerOpen] = useState(false)
+  const [giphyQuery, setGiphyQuery] = useState('')
+  const [giphyResults, setGiphyResults] = useState<GiphyGif[]>([])
+  const [isGiphyLoading, setIsGiphyLoading] = useState(false)
+  const [giphyError, setGiphyError] = useState<string | null>(null)
   const inlineTextRef = useRef<HTMLTextAreaElement | null>(null)
 
   const selectedId = selectedIds.length === 1 ? selectedIds[0] : null
@@ -353,6 +407,11 @@ export function SlideCanvasEditor({
     [elements, selectedId],
   )
 
+  function getSlideHistory(id = slideId) {
+    historyBySlideRef.current[id] ??= { undo: [], redo: [] }
+    return historyBySlideRef.current[id]
+  }
+
   useEffect(() => {
     const elementIds = new Set(elements.map((el) => el.id))
     setSelectedIds((current) => {
@@ -360,6 +419,18 @@ export function SlideCanvasEditor({
       return sameIds(current, next) ? current : next
     })
   }, [elements])
+
+  useEffect(() => {
+    const history = getSlideHistory(slideId)
+    setHistoryCounts({
+      undo: history.undo.length,
+      redo: history.redo.length,
+    })
+    setSelectedIds([])
+    setEditingTextId(null)
+    setGuides([])
+    setMarquee(null)
+  }, [slideId])
 
   useEffect(() => {
     const stage = stageRef.current
@@ -417,8 +488,76 @@ export function SlideCanvasEditor({
     }
   }, [editingTextId, elements])
 
+  function cloneElementsSnapshot(source: SlideElement[] = elements) {
+    return source.map((el) => ({ ...el }))
+  }
+
+  function snapshotsEqual(a: SlideElement[], b: SlideElement[]) {
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+
+  function syncHistoryCounts() {
+    const history = getSlideHistory()
+    setHistoryCounts({
+      undo: history.undo.length,
+      redo: history.redo.length,
+    })
+  }
+
+  function pushUndoSnapshot() {
+    const history = getSlideHistory()
+    const currentSnapshot = cloneElementsSnapshot()
+    const lastSnapshot = history.undo.at(-1)
+    if (lastSnapshot && snapshotsEqual(lastSnapshot, currentSnapshot)) {
+      return
+    }
+
+    history.undo = [...history.undo.slice(-79), currentSnapshot]
+    history.redo = []
+    syncHistoryCounts()
+  }
+
+  function commitElements(nextElements: SlideElement[]) {
+    if (snapshotsEqual(elements, nextElements)) {
+      return
+    }
+
+    pushUndoSnapshot()
+    onChange(nextElements)
+  }
+
+  function applyElements(nextElements: SlideElement[]) {
+    onChange(nextElements)
+  }
+
+  function undoCanvasChange() {
+    const history = getSlideHistory()
+    const previous = history.undo.at(-1)
+    if (!previous) return
+
+    history.undo = history.undo.slice(0, -1)
+    history.redo = [...history.redo, cloneElementsSnapshot()]
+    setEditingTextId(null)
+    setSelectedIds((current) => current.filter((id) => previous.some((el) => el.id === id)))
+    onChange(cloneElementsSnapshot(previous))
+    syncHistoryCounts()
+  }
+
+  function redoCanvasChange() {
+    const history = getSlideHistory()
+    const next = history.redo.at(-1)
+    if (!next) return
+
+    history.redo = history.redo.slice(0, -1)
+    history.undo = [...history.undo, cloneElementsSnapshot()]
+    setEditingTextId(null)
+    setSelectedIds((current) => current.filter((id) => next.some((el) => el.id === id)))
+    onChange(cloneElementsSnapshot(next))
+    syncHistoryCounts()
+  }
+
   function updateElement(id: string, patch: SlideElementPatch) {
-    onChange(elements.map((el) => (el.id === id ? ({ ...el, ...patch } as SlideElement) : el)))
+    commitElements(elements.map((el) => (el.id === id ? ({ ...el, ...patch } as SlideElement) : el)))
   }
 
   function copySelectedElements() {
@@ -450,7 +589,7 @@ export function SlideCanvasEditor({
       })
     })
 
-    onChange([...elements, ...pasted])
+    commitElements([...elements, ...pasted])
     clipboardRef.current = pasted.map((el) => ({ ...el }))
     setSelectedIds(pasted.map((el) => el.id))
     setEditingTextId(null)
@@ -460,7 +599,7 @@ export function SlideCanvasEditor({
   function removeSelected() {
     if (!selectedIds.length) return
     const ids = new Set(selectedIds)
-    onChange(elements.filter((el) => !ids.has(el.id)))
+    commitElements(elements.filter((el) => !ids.has(el.id)))
     setSelectedIds([])
     setEditingTextId(null)
   }
@@ -472,7 +611,7 @@ export function SlideCanvasEditor({
     if (!selectedElements.length) return
     const firstZ = nextZ(elements)
     const zById = new Map(selectedElements.map((el, index) => [el.id, firstZ + index]))
-    onChange(elements.map((el) => (zById.has(el.id) ? ({ ...el, z: zById.get(el.id) } as SlideElement) : el)))
+    commitElements(elements.map((el) => (zById.has(el.id) ? ({ ...el, z: zById.get(el.id) } as SlideElement) : el)))
   }
 
   function alignmentTargets(excludedIds: Set<string>) {
@@ -559,7 +698,7 @@ export function SlideCanvasEditor({
     const minZ = elements.reduce((min, el) => Math.min(min, el.z ?? 0), 0)
     const firstZ = minZ - selectedElements.length
     const zById = new Map(selectedElements.map((el, index) => [el.id, firstZ + index]))
-    onChange(elements.map((el) => (zById.has(el.id) ? ({ ...el, z: zById.get(el.id) } as SlideElement) : el)))
+    commitElements(elements.map((el) => (zById.has(el.id) ? ({ ...el, z: zById.get(el.id) } as SlideElement) : el)))
   }
 
   function initialElementPosition(
@@ -595,7 +734,7 @@ export function SlideCanvasEditor({
       const w = 56
       const h = 56
       const { x, y } = initialElementPosition(w, h, opts)
-      onChange([
+      commitElements([
         ...elements,
         {
           id,
@@ -616,6 +755,61 @@ export function SlideCanvasEditor({
     }
   }
 
+  function addImageUrl(url: string, opts?: { center?: boolean; point?: { x: number; y: number } | null }) {
+    const id = `el_${crypto.randomUUID()}`
+    const w = 56
+    const h = 56
+    const { x, y } = initialElementPosition(w, h, opts)
+    commitElements([
+      ...elements,
+      {
+        id,
+        type: 'image',
+        x,
+        y,
+        w,
+        h,
+        z: nextZ(elements),
+        imageUrl: url,
+      },
+    ])
+    setSelectedIds([id])
+    setImagePickerOpen(false)
+    setError(null)
+  }
+
+  async function loadGiphyResults(query = giphyQuery) {
+    if (!giphyApi.hasApiKey()) {
+      setGiphyError('Ajoute VITE_GIPHY_API_KEY dans ton .env frontend pour activer Giphy.')
+      setGiphyResults([])
+      return
+    }
+
+    setIsGiphyLoading(true)
+    setGiphyError(null)
+    try {
+      const nextResults = query.trim()
+        ? await giphyApi.search(query.trim())
+        : await giphyApi.trending()
+      setGiphyResults(nextResults)
+    } catch {
+      setGiphyError('Impossible de charger les GIF Giphy.')
+      setGiphyResults([])
+    } finally {
+      setIsGiphyLoading(false)
+    }
+  }
+
+  function handleGiphyPickerToggle() {
+    setImagePickerOpen((open) => {
+      const nextOpen = !open
+      if (nextOpen && giphyApi.hasApiKey() && giphyResults.length === 0 && !isGiphyLoading) {
+        void loadGiphyResults('')
+      }
+      return nextOpen
+    })
+  }
+
   function handleAddText() {
     const id = `el_${crypto.randomUUID()}`
     const el: SlideTextElement = {
@@ -630,8 +824,9 @@ export function SlideCanvasEditor({
       fontSize: 22,
       align: 'left',
       color: DEFAULT_TEXT_COLOR,
+      bold: true,
     }
-    onChange([...elements, el])
+    commitElements([...elements, el])
     setSelectedIds([id])
     setEditingTextId(id)
   }
@@ -650,12 +845,12 @@ export function SlideCanvasEditor({
       strokeWidth: 5,
       rotation: 0,
     }
-    onChange([...elements, el])
+    commitElements([...elements, el])
     setSelectedIds([id])
     setEditingTextId(null)
   }
 
-  function handleAddRect(opts?: { fillEnabled?: boolean; hideOnHostClick?: boolean }) {
+  function handleAddRect(opts?: { fillEnabled?: boolean; hideOnHostClick?: boolean; shape?: 'rect' | 'ellipse' }) {
     const id = `el_${crypto.randomUUID()}`
     const fillEnabled = opts?.fillEnabled ?? true
     const el: SlideRectElement = {
@@ -670,9 +865,10 @@ export function SlideCanvasEditor({
       strokeColor: DEFAULT_SHAPE_COLOR,
       strokeWidth: fillEnabled ? 0 : 4,
       fillEnabled,
+      shape: opts?.shape ?? 'rect',
       hideOnHostClick: opts?.hideOnHostClick ?? false,
     }
-    onChange([...elements, el])
+    commitElements([...elements, el])
     setSelectedIds([id])
     setEditingTextId(null)
   }
@@ -690,6 +886,7 @@ export function SlideCanvasEditor({
     const maxDx = Math.min(...dragElements.map((el) => 100 - MIN_VISIBLE_EDGE - el.x))
     const minDy = Math.max(...dragElements.map((el) => MIN_VISIBLE_EDGE - el.h - el.y))
     const maxDy = Math.min(...dragElements.map((el) => 100 - MIN_VISIBLE_EDGE - el.y))
+    pushUndoSnapshot()
 
     const onMove = (e: PointerEvent) => {
       const dxPct = ((e.clientX - startClientX) / rect.width) * 100
@@ -710,7 +907,7 @@ export function SlideCanvasEditor({
       const nextDx = clamp(rawDx + snap.dx, minDx, maxDx)
       const nextDy = clamp(rawDy + snap.dy, minDy, maxDy)
       setGuides(snap.guides)
-      onChange(
+      applyElements(
         elements.map((el) => {
           const start = startPositions.get(el.id)
           return start ? ({ ...el, x: start.x + nextDx, y: start.y + nextDy } as SlideElement) : el
@@ -736,6 +933,7 @@ export function SlideCanvasEditor({
     const startW = el.w
     const startH = el.h
     const minSize = el.type === 'line' ? 0.8 : 6
+    pushUndoSnapshot()
 
     const onMove = (e: PointerEvent) => {
       const dwPct = ((e.clientX - startClientX) / rect.width) * 100
@@ -758,7 +956,7 @@ export function SlideCanvasEditor({
           : clamp(rawW + snap.dx, minSize, ELEMENT_MAX_SIZE)
       const nextH = clamp(rawH + snap.dy, minSize, ELEMENT_MAX_SIZE)
       setGuides(snap.guides)
-      updateElement(id, { w: nextW, h: nextH })
+      applyElements(elements.map((item) => (item.id === id ? ({ ...item, w: nextW, h: nextH } as SlideElement) : item)))
     }
 
     const onUp = () => {
@@ -793,6 +991,7 @@ export function SlideCanvasEditor({
     const fixedX = endpoint === 'start' ? currentEndX : currentStartX
     const fixedY = endpoint === 'start' ? currentEndY : currentStartY
     const lineHeight = Math.max(0.8, el.h)
+    pushUndoSnapshot()
 
     const updateFromClient = (clientX: number, clientY: number) => {
       const movingX = clamp(clientX - rect.left, 0, rect.width)
@@ -811,7 +1010,7 @@ export function SlideCanvasEditor({
       const nextY = clamp(centerPctY - lineHeight / 2, -20, 120)
       const nextRotation = normalizeHalfStep((Math.atan2(vy, vx) * 180) / Math.PI)
 
-      onChange(
+      applyElements(
         elements.map((item) =>
           item.id === id
             ? ({
@@ -864,7 +1063,7 @@ export function SlideCanvasEditor({
       const w = 64
       const h = 36
       const { x, y } = initialElementPosition(w, h, opts)
-      onChange([
+      commitElements([
         ...elements,
         {
           id,
@@ -953,6 +1152,22 @@ export function SlideCanvasEditor({
     const shortcutKey = e.key.toLowerCase()
     const hasModifier = e.ctrlKey || e.metaKey
 
+    if (hasModifier && shortcutKey === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) {
+        redoCanvasChange()
+      } else {
+        undoCanvasChange()
+      }
+      return
+    }
+
+    if (hasModifier && shortcutKey === 'y') {
+      e.preventDefault()
+      redoCanvasChange()
+      return
+    }
+
     if (hasModifier && shortcutKey === 'c') {
       if (copySelectedElements()) {
         e.preventDefault()
@@ -985,6 +1200,28 @@ export function SlideCanvasEditor({
   return (
     <div className="slide-canvas-editor">
       <div className="toolbar-actions">
+        <Button
+          aria-label="Annuler la dernière modification"
+          className="slide-canvas-tool-button"
+          disabled={historyCounts.undo === 0}
+          onClick={undoCanvasChange}
+          title="Annuler"
+          type="button"
+          variant="secondary"
+        >
+          <ActionIcon name="undo" />
+        </Button>
+        <Button
+          aria-label="Rétablir la modification"
+          className="slide-canvas-tool-button"
+          disabled={historyCounts.redo === 0}
+          onClick={redoCanvasChange}
+          title="Rétablir"
+          type="button"
+          variant="secondary"
+        >
+          <ActionIcon name="redo" />
+        </Button>
         <Button
           aria-label="Ajouter du texte"
           className="slide-canvas-tool-button"
@@ -1019,6 +1256,17 @@ export function SlideCanvasEditor({
           <span className="slide-canvas-tool-label">Rectangle plein</span>
         </Button>
         <Button
+          aria-label="Ajouter une forme ronde ou ovale"
+          className="slide-canvas-tool-button"
+          onClick={() => handleAddRect({ fillEnabled: true, shape: 'ellipse' })}
+          title="Rond / ovale"
+          type="button"
+          variant="secondary"
+        >
+          <ToolIcon name="ellipse" />
+          <span className="slide-canvas-tool-label">Rond / ovale</span>
+        </Button>
+        <Button
           aria-label="Ajouter un cadre"
           className="slide-canvas-tool-button"
           onClick={() => handleAddRect({ fillEnabled: false })}
@@ -1051,11 +1299,25 @@ export function SlideCanvasEditor({
           <input
             accept="image/png,image/jpeg,image/webp"
             disabled={isUploading}
-            onChange={(e) => handleAddImage(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              void handleAddImage(e.target.files?.[0] ?? null)
+              e.currentTarget.value = ''
+            }}
             type="file"
             style={{ display: 'none' }}
           />
         </label>
+        <Button
+          aria-label="Ajouter un GIF Giphy"
+          className="slide-canvas-tool-button"
+          onClick={handleGiphyPickerToggle}
+          title="GIF"
+          type="button"
+          variant="secondary"
+        >
+          <ToolIcon name="gif" />
+          <span className="slide-canvas-tool-label">GIF</span>
+        </Button>
         <label
           aria-label="Ajouter une video"
           className="secondary-button ui-button-md slide-canvas-tool-button"
@@ -1107,6 +1369,59 @@ export function SlideCanvasEditor({
           </>
         ) : null}
       </div>
+
+      {imagePickerOpen ? (
+        <div className="slide-image-picker">
+          <div
+            className="slide-giphy-search"
+          >
+            <Input
+              aria-label="Rechercher un GIF Giphy"
+              onChange={(event) => setGiphyQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                void loadGiphyResults()
+              }}
+              placeholder="Rechercher un GIF"
+              type="search"
+              value={giphyQuery}
+            />
+            <Button
+              disabled={isGiphyLoading}
+              onClick={() => void loadGiphyResults()}
+              type="button"
+              variant="secondary"
+            >
+              Chercher
+            </Button>
+          </div>
+
+          <div className="slide-giphy-meta">
+            <span>Powered by GIPHY</span>
+            {isGiphyLoading ? <span>Chargement...</span> : null}
+          </div>
+
+          {giphyError ? <p className="form-error">{giphyError}</p> : null}
+
+          {giphyResults.length ? (
+            <div className="slide-giphy-grid">
+              {giphyResults.map((gif) => (
+                <button
+                  aria-label={`Ajouter ${gif.title}`}
+                  className="slide-giphy-item"
+                  key={gif.id}
+                  onClick={() => addImageUrl(gif.imageUrl, { center: true })}
+                  title={gif.title}
+                  type="button"
+                >
+                  <img alt="" loading="lazy" src={gif.previewUrl} />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? <p className="form-error">{error}</p> : null}
 
@@ -1168,6 +1483,7 @@ export function SlideCanvasEditor({
                 zIndex: (el.z ?? 0) + 50,
                 transform: el.type === 'line' ? `rotate(${el.rotation ?? 0}deg)` : undefined,
                 transformOrigin: el.type === 'line' ? '50% 50%' : undefined,
+                borderRadius: el.type === 'rect' && el.shape === 'ellipse' ? '50%' : undefined,
               }}
               onDoubleClick={(e) => {
                 if (el.type !== 'text') return
@@ -1200,6 +1516,13 @@ export function SlideCanvasEditor({
               }}
             >
               {el.type === 'text' && editingTextId === el.id ? (
+                (() => {
+                  const textDecorations = [
+                    el.underline ? 'underline' : null,
+                    el.strikethrough ? 'line-through' : null,
+                  ].filter(Boolean)
+
+                  return (
                 <textarea
                   className="slide-canvas-inline-textarea"
                   onBlur={() => setEditingTextId(null)}
@@ -1214,12 +1537,18 @@ export function SlideCanvasEditor({
                   ref={inlineTextRef}
                   rows={1}
                   style={{
+                    background: el.highlightColor || undefined,
                     color: el.color ?? DEFAULT_TEXT_COLOR,
                     fontSize: toCanvasFontSize(el.fontSize),
+                    fontStyle: el.italic ? 'italic' : undefined,
+                    fontWeight: el.bold === false ? 500 : 1000,
+                    textDecorationLine: textDecorations.length ? textDecorations.join(' ') : undefined,
                     textAlign: el.align ?? 'left',
                   }}
                   value={el.text}
                 />
+                  )
+                })()
               ) : null}
               {selectedId === el.id && el.type === 'line' ? (
                 <>
@@ -1307,6 +1636,66 @@ export function SlideCanvasEditor({
                 onChange={(e) => updateElement(selected.id, { color: e.target.value })}
               />
             </FormField>
+            <div className="slide-text-style-controls" aria-label="Style du texte">
+              <button
+                aria-pressed={selected.bold !== false}
+                className="slide-text-style-button"
+                onClick={() => updateElement(selected.id, { bold: selected.bold === false })}
+                title="Gras"
+                type="button"
+              >
+                B
+              </button>
+              <button
+                aria-pressed={Boolean(selected.italic)}
+                className="slide-text-style-button slide-text-style-button-italic"
+                onClick={() => updateElement(selected.id, { italic: !selected.italic })}
+                title="Italique"
+                type="button"
+              >
+                I
+              </button>
+              <button
+                aria-pressed={Boolean(selected.underline)}
+                className="slide-text-style-button slide-text-style-button-underline"
+                onClick={() => updateElement(selected.id, { underline: !selected.underline })}
+                title="Souligner"
+                type="button"
+              >
+                U
+              </button>
+              <button
+                aria-pressed={Boolean(selected.strikethrough)}
+                className="slide-text-style-button slide-text-style-button-strike"
+                onClick={() => updateElement(selected.id, { strikethrough: !selected.strikethrough })}
+                title="Barrer"
+                type="button"
+              >
+                S
+              </button>
+              <button
+                aria-pressed={Boolean(selected.highlightColor)}
+                className="slide-text-style-button slide-text-style-button-highlight"
+                onClick={() =>
+                  updateElement(selected.id, {
+                    highlightColor: selected.highlightColor ? null : DEFAULT_HIGHLIGHT_COLOR,
+                  })
+                }
+                title="Surligner"
+                type="button"
+              >
+                H
+              </button>
+            </div>
+            <FormField label="Surlignage">
+              <Input
+                className="slide-canvas-color-input"
+                disabled={!selected.highlightColor}
+                type="color"
+                value={selected.highlightColor ?? DEFAULT_HIGHLIGHT_COLOR}
+                onChange={(e) => updateElement(selected.id, { highlightColor: e.target.value })}
+              />
+            </FormField>
           </div>
         ) : selected?.type === 'video' ? (
           <VideoClipInspector
@@ -1386,6 +1775,16 @@ function ShapeInspector({
           }
           type="checkbox"
         />
+      </FormField>
+      <FormField label="Forme">
+        <select
+          className="ui-input"
+          onChange={(event) => onUpdate({ shape: event.target.value as SlideRectElement['shape'] })}
+          value={element.shape ?? 'rect'}
+        >
+          <option value="rect">Rectangle</option>
+          <option value="ellipse">Rond / ovale</option>
+        </select>
       </FormField>
       <FormField label="Couleur fond">
         <Input
