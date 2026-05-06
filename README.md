@@ -9,7 +9,7 @@ The goal is simple: let anyone create their own quizzes, launch them in a live r
 - Create custom quizzes with your own questions.
 - Share quizzes with other players.
 - Join a room to take part in a live game.
-- Play together in real time, with questions shown to every participant.
+- Play together in real time.
 - Follow scores during the game.
 - Compare results through a global leaderboard.
 
