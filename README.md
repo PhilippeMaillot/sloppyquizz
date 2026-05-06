@@ -7,6 +7,7 @@ The goal is simple: let anyone create their own quizzes, launch them in a live r
 ## What the app does
 
 - Create custom quizzes with your own questions.
+- Edit each quiz question like a canvas, with images, GIFs powered by GIPHY, blind tests, and video clips.
 - Share quizzes with other players.
 - Join a room to take part in a live game.
 - Play together in real time.
